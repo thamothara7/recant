@@ -11,7 +11,10 @@ until docker compose exec roach1 ./cockroach sql --insecure --host=roach1:26257 
     sleep 1
 done
 
+# SET CLUSTER SETTING cannot run in a multi-statement transaction: keep the
+# statements in separate -e flags so each runs as its own implicit transaction.
 docker compose exec roach1 ./cockroach sql --insecure --host=roach1:26257 \
-    -e "CREATE DATABASE IF NOT EXISTS recant; SET CLUSTER SETTING kv.rangefeed.enabled = true;"
+    -e "CREATE DATABASE IF NOT EXISTS recant" \
+    -e "SET CLUSTER SETTING kv.rangefeed.enabled = true"
 
 echo "cluster ready: postgresql://root@localhost:26257/recant?sslmode=disable"
