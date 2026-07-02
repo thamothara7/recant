@@ -1,0 +1,42 @@
+"""Signing for attested writes.
+
+Development signer only: keys are derived deterministically from the agent name so
+the demo is reproducible (spec section 10). Production signing goes through AWS KMS
+using agents.kms_key_arn (Week 4) behind the same sign(digest) interface; both sign
+the 32-byte chain hash from chain.chain_hash.
+"""
+
+import hashlib
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+
+
+class Ed25519Signer:
+    def __init__(self, private_key: Ed25519PrivateKey):
+        self._key = private_key
+
+    @classmethod
+    def from_seed(cls, seed: bytes) -> "Ed25519Signer":
+        return cls(Ed25519PrivateKey.from_private_bytes(hashlib.sha256(seed).digest()))
+
+    def sign(self, digest: bytes) -> bytes:
+        return self._key.sign(digest)
+
+    def public_key_bytes(self) -> bytes:
+        return self._key.public_key().public_bytes_raw()
+
+
+def dev_signer_for(agent_name: str) -> Ed25519Signer:
+    return Ed25519Signer.from_seed(f"recant-dev-key:{agent_name}".encode())
+
+
+def verify_signature(public_key: bytes, digest: bytes, sig: bytes) -> bool:
+    try:
+        Ed25519PublicKey.from_public_bytes(public_key).verify(sig, digest)
+        return True
+    except InvalidSignature:
+        return False
