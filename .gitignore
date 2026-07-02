@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+node_modules/
+dist/
+.DS_Store
+*.egg-info/
+RECANT_SYSTEM_PROMPT.md
+recant-frontend-SKILL.md
+recant-frontend.skill

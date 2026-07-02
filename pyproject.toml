@@ -1,0 +1,25 @@
+[project]
+name = "recant"
+version = "0.1.0"
+description = "Chain of custody for machine memory: provenance and retraction substrate for agent memory on CockroachDB"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "psycopg[binary,pool]>=3.2",
+    "pydantic>=2.8",
+    "cryptography>=43",
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
