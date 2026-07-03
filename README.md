@@ -31,20 +31,25 @@ What works today:
 - Full CockroachDB schema (`sources`, `agents`, `beliefs`, `derivations`,
   `incidents`, `quarantine_actions`, `memory_events`) applied by numbered raw
   SQL migrations, with a vector index on belief embeddings and a row-level TTL
-  for beliefs sourced from untrusted-tier sources.
+  for beliefs sourced from untrusted-tier sources. Confirmed Jul 2 against the
+  local `cockroachdb/cockroach:latest-v26.2` arm64 image: `CREATE VECTOR
+  INDEX` applies cleanly (migrations 0001-0003).
 - attest-gateway: the only write path into memory. Every belief write happens
   inside one serializable transaction that reads the agent's chain head
   `FOR UPDATE`, computes a hash-chained payload, signs it with a deterministic
   Ed25519 dev key, and advances the head. Writes retry on SQLSTATE 40001 with
-  jitter.
+  jitter. Belief writes accept an optional client-supplied embedding; there is
+  no fake embedder yet (see AWS services table below).
 - Deterministic seed fixtures (3 agents, 4 sources, 7 beliefs, including one
   explicit derivation edge) created entirely through the gateway API.
-- A local 3-node CockroachDB chaos cluster (`ops/chaos/`) for the node-kill
-  proof moment, and a changefeed-tier spike report
+- A local 3-node CockroachDB chaos cluster (`ops/chaos/`), bound to loopback
+  only, for the node-kill proof moment, and a changefeed-tier spike report
   (`docs/spike-changefeeds.md`).
 - Unit tests for the hash chain, dev signer, migration runner, and
   transaction retry policy, plus an integration suite for the gateway that is
-  skipped unless `DATABASE_URL` is set.
+  skipped unless `DATABASE_URL` is set. The full suite is 33 tests (17 unit,
+  16 integration) and green against the live local cluster, including
+  regression tests for chain-signature forgery and tail truncation.
 
 Not yet built: the taint engine, quarantine service, changefeed fanout,
 forensics API, demo fleet agents, and console. See the architecture summary
@@ -75,6 +80,23 @@ ops/chaos/init.sh
 export DATABASE_URL=postgresql://root@localhost:26257/recant?sslmode=disable
 
 uv run python -m db.migrate
+```
+
+Run the tests next, before seeding:
+
+```bash
+uv run pytest
+```
+
+Tests under `tests/integration/` skip automatically unless `DATABASE_URL` is
+set; unit tests under `tests/unit/` always run. The integration suite deletes
+every row from every table before each test, so running it against a seeded
+database wipes the seed data; reseed afterward (below) if you want data to
+inspect.
+
+Now start the gateway:
+
+```bash
 uv run uvicorn services.attest_gateway.app:app --port 8000
 ```
 
@@ -86,21 +108,21 @@ uv run python ops/seed/seed.py
 
 Expected output: `seeded 3 agents, 4 sources, 7 beliefs`.
 
-Run the tests:
+Then verify a chain, for example the `researcher` agent seeded above:
 
 ```bash
-uv run pytest
+AGENT_ID=$(docker compose -f ops/chaos/docker-compose.yml exec -T roach1 \
+    ./cockroach sql --insecure --host=roach1:26257 -d recant --format=csv \
+    -e "SELECT agent_id FROM agents WHERE name = 'researcher'" | tail -n1)
+curl http://localhost:8000/agents/$AGENT_ID/chain/verify
 ```
-
-Tests under `tests/integration/` skip automatically unless `DATABASE_URL` is
-set; unit tests under `tests/unit/` always run.
 
 ## CockroachDB tools
 
 | Tool | What the agent does with it | Status |
 |---|---|---|
 | CockroachDB Cloud Managed MCP Server | During development, connects for schema inspection and query-plan analysis, read-only. In the product, the Investigator agent answers forensic questions such as "is this belief clean, show its custody chain" through read-only MCP tool calls, fully audit-logged. | Blocked on U1 (cluster signup); connection steps recorded in `docs/mcp-setup.md`. |
-| Distributed Vector Indexing | `VECTOR(1024)` column on `beliefs` (`db/migrations/0001_schema.sql`) with a vector index (`db/migrations/0002_vector_index.sql`) for implicit taint tracing, finding paraphrased contamination with no explicit provenance edge, and similar-incident retrieval. | Migration written; not yet applied against a live cluster, see `docs/spike-changefeeds.md`. |
+| Distributed Vector Indexing | `VECTOR(1024)` column on `beliefs` (`db/migrations/0001_schema.sql`) with a vector index (`db/migrations/0002_vector_index.sql`) for implicit taint tracing, finding paraphrased contamination with no explicit provenance edge, and similar-incident retrieval. | Confirmed Jul 2: `CREATE VECTOR INDEX` applies cleanly against the local `cockroachdb/cockroach:latest-v26.2` arm64 image. Support on CockroachDB Cloud Basic is unverified until U1 provides a live cluster. |
 | ccloud CLI | Drives cluster provisioning, service-account creation, and audit-log retrieval with `--json` output from scripts under `ops/`; the demo's ops agent runs a scripted health check on camera. | Blocked on U2 (CLI install and service account); targeted Week 3. |
 | CockroachDB Agent Skills repo | Schema design review and statement or performance profiling invoked against this repo, with before and after recorded in `docs/agent-skills-log.md`. | Pending, blocked on U1 (needs a live cluster); entries queued in `docs/agent-skills-log.md`. |
 
@@ -108,7 +130,7 @@ set; unit tests under `tests/unit/` always run.
 
 | Service | What the agent does with it | Status |
 |---|---|---|
-| Amazon Bedrock | Titan Text Embeddings V2 (1024 dimensions) for belief embeddings; Claude for incident affidavits and apply or distinguish reasoning. | Not yet integrated; Week 1 uses an optional client-supplied embedding and a deterministic fake embedder for tests (`services/common/vectors.py`). Blocked on U3 (AWS credentials). |
+| Amazon Bedrock | Titan Text Embeddings V2 (1024 dimensions) for belief embeddings; Claude for incident affidavits and apply or distinguish reasoning. | Not yet integrated; Week 1 stores an optional client-supplied embedding only, no fake embedder exists yet. A deterministic fake embedder arrives in Week 2 alongside the taint-engine tests. Blocked on U3 (AWS credentials). |
 | AWS Lambda | Consumes the changefeed webhook and fans out eviction notices to demo agents. | Not yet built; targeted Week 3, blocked on U3. |
 | Amazon S3 (Object Lock) | Immutable evidence archive for belief history beyond the CockroachDB GC window. | Not yet built; targeted Week 4, blocked on U3. |
 | Amazon EventBridge | Event bus between the changefeed Lambda and agent runtimes for cache eviction. | Not yet built; targeted Week 3, blocked on U3. |
@@ -117,7 +139,7 @@ set; unit tests under `tests/unit/` always run.
 
 | Failure mode | Handling |
 |---|---|
-| Changefeed unavailable on the CockroachDB tier | Falls back to polling the `memory_events` outbox table behind the same `EvictionBus` interface, so calling code does not change. See `docs/spike-changefeeds.md`. |
+| Changefeed unavailable on the CockroachDB tier | Fallback designed, not yet built: poll the `memory_events` outbox table behind the same `EvictionBus` interface, so calling code would not change. Targeted Week 3 alongside fanout. See `docs/spike-changefeeds.md`. |
 | KMS unavailable in development | A deterministic Ed25519 dev signer derives keys from the agent name and is clearly labeled as a dev signer; production replaces it with an AWS KMS signer behind the same `Signer` interface (Week 4). |
 | Node loss | The local chaos cluster runs 3 CockroachDB nodes; the cluster and in-flight forensics queries survive the loss of 1 node. |
 | Serialization conflicts | Writes that hit SQLSTATE 40001 are retried with jitter (`services/common/db.py`) instead of surfaced to the caller. |

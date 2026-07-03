@@ -1,28 +1,29 @@
 # Local 3-node CockroachDB cluster: development target and the node-kill
-# survivability demo (spec section 4). Insecure mode is local-only.
+# survivability demo (spec section 4). Insecure mode: ports are loopback-bound
+# so the insecure cluster is never reachable from the network.
 services:
   roach1:
     image: cockroachdb/cockroach:latest-v26.2
     command: start --insecure --join=roach1,roach2,roach3 --advertise-addr=roach1
     ports:
-      - "26257:26257"
-      - "8080:8080"
+      - "127.0.0.1:26257:26257"
+      - "127.0.0.1:8080:8080"
     volumes:
       - roach1:/cockroach/cockroach-data
   roach2:
     image: cockroachdb/cockroach:latest-v26.2
     command: start --insecure --join=roach1,roach2,roach3 --advertise-addr=roach2
     ports:
-      - "26258:26257"
-      - "8081:8080"
+      - "127.0.0.1:26258:26257"
+      - "127.0.0.1:8081:8080"
     volumes:
       - roach2:/cockroach/cockroach-data
   roach3:
     image: cockroachdb/cockroach:latest-v26.2
     command: start --insecure --join=roach1,roach2,roach3 --advertise-addr=roach3
     ports:
-      - "26259:26257"
-      - "8082:8080"
+      - "127.0.0.1:26259:26257"
+      - "127.0.0.1:8082:8080"
     volumes:
       - roach3:/cockroach/cockroach-data
 volumes:

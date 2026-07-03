@@ -1,7 +1,10 @@
 """Apply db/migrations/*.sql in filename order, tracked in schema_migrations.
 
 Statements are split on semicolons at end of line: one statement per terminating
-semicolon, no procedural ($$) bodies allowed in migration files.
+semicolon, no procedural ($$) bodies allowed in migration files. Migration files
+must also avoid inline trailing comments after a terminating semicolon and must
+not place semicolons inside string literals, since the splitter only recognizes
+a semicolon that ends a line as a statement terminator.
 """
 
 import os

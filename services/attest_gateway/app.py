@@ -22,7 +22,7 @@ from services.attest_gateway.models import (
     SourceIn,
     SourceOut,
 )
-from services.attest_gateway.signer import dev_signer_for
+from services.attest_gateway.signer import dev_signer_for, verify_signature
 from services.common.db import run_txn
 from services.common.vectors import to_vector_literal
 
@@ -82,6 +82,7 @@ def create_source(body: SourceIn) -> SourceOut:
 @app.post("/beliefs", response_model=BeliefOut, status_code=201)
 def create_belief(body: BeliefIn) -> BeliefOut:
     ts = datetime.now(timezone.utc)
+    parent_ids = list(dict.fromkeys(body.parent_ids))
 
     def txn(conn: psycopg.Connection) -> BeliefOut:
         row = conn.execute(
@@ -109,7 +110,7 @@ def create_belief(body: BeliefIn) -> BeliefOut:
             seq=seq,
             content=body.content,
             source_id=body.source_id,
-            parent_ids=body.parent_ids,
+            parent_ids=parent_ids,
             ts=ts,
         )
         h = chain.chain_hash(prev, payload)
@@ -127,7 +128,7 @@ def create_belief(body: BeliefIn) -> BeliefOut:
             (body.agent_id, seq, body.content, emb, ts, sig, prev, h, body.source_id, ttl_expire_at),
         ).fetchone()[0]
 
-        for pid in body.parent_ids:
+        for pid in parent_ids:
             conn.execute(
                 "INSERT INTO derivations (child_id, parent_id, kind, score) VALUES (%s, %s, 'explicit', 1.0)",
                 (belief_id, pid),
@@ -158,34 +159,75 @@ def create_belief(body: BeliefIn) -> BeliefOut:
 @app.get("/agents/{agent_id}/chain/verify", response_model=ChainVerification)
 def verify_agent_chain(agent_id: UUID) -> ChainVerification:
     def txn(conn: psycopg.Connection):
-        return conn.execute(
+        agent_row = conn.execute(
+            "SELECT pubkey, head_hash, head_seq FROM agents WHERE agent_id = %s",
+            (agent_id,),
+        ).fetchone()
+        if agent_row is None:
+            raise HTTPException(status_code=404, detail="unknown agent")
+        rows = conn.execute(
             """
-            SELECT b.seq, b.content, b.source_id, b.created_at, b.hash,
-                   (SELECT array_agg(d.parent_id) FROM derivations d WHERE d.child_id = b.belief_id)
+            SELECT b.seq, b.content, b.source_id, b.created_at, b.hash, b.sig,
+                   (SELECT array_agg(d.parent_id) FROM derivations d
+                    WHERE d.child_id = b.belief_id AND d.kind = 'explicit')
             FROM beliefs b
             WHERE b.agent_id = %s
             ORDER BY b.seq
             """,
             (agent_id,),
         ).fetchall()
+        return agent_row, rows
 
-    rows = run_txn(txn)
+    agent_row, rows = run_txn(txn)
+    pubkey, head_hash, head_seq = agent_row
+    pubkey = bytes(pubkey)
+    head_hash = bytes(head_hash) if head_hash is not None else None
+    head_seq = int(head_seq)
+
     records = [
         chain.ChainRecord(
             agent_id=agent_id,
             seq=r[0],
             content=r[1],
             source_id=r[2],
-            parent_ids=list(r[5] or []),
+            parent_ids=list(r[6] or []),
             ts=r[3],
             hash=bytes(r[4]),
         )
         for r in rows
     ]
+    sigs = [bytes(r[5]) for r in rows]
+
     valid, bad = chain.verify_chain(records)
+    reason: str | None = None
+    if not valid:
+        reason = "hash_mismatch"
+    else:
+        for i, (record, sig) in enumerate(zip(records, sigs)):
+            if not verify_signature(pubkey, record.hash, sig):
+                valid = False
+                bad = i
+                reason = "bad_signature"
+                break
+
+    first_invalid_seq = None if valid else records[bad].seq
+
+    if valid:
+        if records:
+            last = records[-1]
+            if last.seq != head_seq or last.hash != head_hash:
+                valid = False
+                reason = "truncated"
+                first_invalid_seq = head_seq
+        elif head_seq != 0:
+            valid = False
+            reason = "truncated"
+            first_invalid_seq = head_seq
+
     return ChainVerification(
         agent_id=agent_id,
         length=len(records),
         valid=valid,
-        first_invalid_seq=None if valid else records[bad].seq,
+        first_invalid_seq=first_invalid_seq,
+        reason=reason,
     )

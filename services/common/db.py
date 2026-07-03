@@ -38,7 +38,8 @@ def retry_serialization(
             return fn()
         except psycopg.errors.SerializationFailure as exc:
             last = exc
-            sleep(min(0.025 * (2**attempt), 1.0) * (0.5 + random.random()))
+            if attempt < max_retries - 1:
+                sleep(min(0.025 * (2**attempt), 1.0) * (0.5 + random.random()))
     assert last is not None
     raise last
 

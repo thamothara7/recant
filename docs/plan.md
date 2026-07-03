@@ -47,6 +47,7 @@ Items that cannot be completed by the agent; the human must act.
 | U3 | AWS account credentials (Bedrock, Lambda, S3, EventBridge access) and `aws` CLI install | pending |
 | U4 | Docker Desktop running locally (daemon was unreachable at plan time) | done (started Jul 2; integration pass green) |
 | U5 | Connect the CockroachDB Cloud Managed MCP Server to this Claude Code session after U1 | pending |
+| U6 | Decide GitHub publication: repo github.com/thamothara7/recant is private and 6+ commits are unpushed; judges need a public repo with pushed HEAD (submission requirement, spec section 2) | pending |
 
 ## Risks
 
@@ -61,7 +62,19 @@ Items that cannot be completed by the agent; the human must act.
 
 - Local 3-node cluster up (cockroachdb/cockroach:latest-v26.2, arm64); init.sh fixed to run SET CLUSTER SETTING outside a multi-statement transaction.
 - Migrations 0001-0003 applied, including CREATE VECTOR INDEX; gc.ttlseconds=86400 set on beliefs via configure-gc.sh.
-- Full test suite green against the live cluster: 26 passed (17 unit, 9 integration).
+- Full test suite green against the live cluster: 33 passed (17 unit, 16 integration), including regression tests for chain-signature forgery and tail truncation added in the Jul 3 review.
 - Seed via gateway API: 3 agents, 4 sources, 7 beliefs; chains verify; 2 explicit derivation edges; 1 untrusted-source belief carries ttl_expire_at.
 - Node-kill rehearsal (proof moment 6): chain verification answered with roach3 killed; roach3 restarted after.
 - Known cosmetic warnings: starlette TestClient httpx deprecation; psycopg_pool default-open deprecation.
+
+### Deferred to W2
+
+- Structured JSON logging with `incident_id` correlation: incidents do not
+  exist until the taint engine and quarantine service land in Week 2, so
+  there is nothing to correlate yet.
+- Deterministic fake embedder: needed for the Week 2 taint-engine tests
+  (implicit closure via vector kNN); Week 1 only accepts an optional
+  client-supplied embedding.
+- Embedding write-path exercised only via tests until the fleet exists: no
+  real agent produces embeddings yet, so the `embedding` column is only
+  populated by test fixtures that pass one in explicitly.

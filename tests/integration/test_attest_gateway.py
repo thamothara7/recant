@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from uuid import UUID
 
 from tests.integration.conftest import requires_db
 
@@ -50,6 +51,7 @@ def test_beliefs_chain_and_signatures_verify(client):
         "length": 2,
         "valid": True,
         "first_invalid_seq": None,
+        "reason": None,
     }
 
 
@@ -137,3 +139,137 @@ def test_concurrent_writes_keep_chain_intact(client):
     assert sorted(r["seq"] for r in results) == list(range(1, 9))
     v = client.get(f"/agents/{agent['agent_id']}/chain/verify").json()
     assert v["valid"] is True and v["length"] == 8
+
+
+def test_full_rehash_forgery_fails_signature(client):
+    """An attacker who rewrites content and re-derives the *whole* chain (the
+    payload format is public) still fails verification because the recomputed
+    hashes are never re-signed with the agent's real key."""
+    from services.attest_gateway import chain
+    from services.common.db import get_pool
+
+    agent = _agent(client)
+    agent_uuid = UUID(agent["agent_id"])
+    _belief(client, agent["agent_id"], "one")
+    _belief(client, agent["agent_id"], "two")
+
+    with get_pool().connection() as conn:
+        seq1, source_id1, ts1 = conn.execute(
+            "SELECT seq, source_id, created_at FROM beliefs WHERE agent_id = %s AND seq = 1",
+            (agent["agent_id"],),
+        ).fetchone()
+        seq2, source_id2, ts2, content2 = conn.execute(
+            "SELECT seq, source_id, created_at, content FROM beliefs WHERE agent_id = %s AND seq = 2",
+            (agent["agent_id"],),
+        ).fetchone()
+
+        forged_content = "the refund window is 365 days"
+        payload1 = chain.canonical_payload(
+            agent_id=agent_uuid, seq=seq1, content=forged_content,
+            source_id=source_id1, parent_ids=[], ts=ts1,
+        )
+        hash1 = chain.chain_hash(chain.GENESIS, payload1)
+
+        payload2 = chain.canonical_payload(
+            agent_id=agent_uuid, seq=seq2, content=content2,
+            source_id=source_id2, parent_ids=[], ts=ts2,
+        )
+        hash2 = chain.chain_hash(hash1, payload2)
+
+        forged_sig = b"\x00" * 64
+        conn.execute(
+            "UPDATE beliefs SET content = %s, prev_hash = %s, hash = %s, sig = %s "
+            "WHERE agent_id = %s AND seq = 1",
+            (forged_content, chain.GENESIS, hash1, forged_sig, agent["agent_id"]),
+        )
+        conn.execute(
+            "UPDATE beliefs SET prev_hash = %s, hash = %s, sig = %s "
+            "WHERE agent_id = %s AND seq = 2",
+            (hash1, hash2, forged_sig, agent["agent_id"]),
+        )
+        conn.execute(
+            "UPDATE agents SET head_hash = %s, head_seq = %s WHERE agent_id = %s",
+            (hash2, seq2, agent["agent_id"]),
+        )
+
+    v = client.get(f"/agents/{agent['agent_id']}/chain/verify").json()
+    assert v["valid"] is False
+    assert v["reason"] == "bad_signature"
+
+
+def test_tail_truncation_detected(client):
+    from services.common.db import get_pool
+
+    agent = _agent(client)
+    _belief(client, agent["agent_id"], "one")
+    _belief(client, agent["agent_id"], "two")
+
+    with get_pool().connection() as conn:
+        conn.execute(
+            "DELETE FROM beliefs WHERE agent_id = %s AND seq = 2", (agent["agent_id"],)
+        )
+
+    v = client.get(f"/agents/{agent['agent_id']}/chain/verify").json()
+    assert v["valid"] is False
+    assert v["reason"] == "truncated"
+
+
+def test_verify_unknown_agent_404(client):
+    r = client.get("/agents/00000000-0000-0000-0000-000000000000/chain/verify")
+    assert r.status_code == 404
+
+
+def test_verify_ignores_inferred_derivations(client):
+    from services.common.db import get_pool
+
+    agent = _agent(client)
+    b1 = _belief(client, agent["agent_id"], "parent")
+    b3 = _belief(client, agent["agent_id"], "unrelated")
+    b2 = _belief(client, agent["agent_id"], "child", parent_ids=[b1["belief_id"]])
+
+    with get_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO derivations (child_id, parent_id, kind, score) VALUES (%s, %s, 'inferred', 0.5)",
+            (b2["belief_id"], b3["belief_id"]),
+        )
+
+    v = client.get(f"/agents/{agent['agent_id']}/chain/verify").json()
+    assert v["valid"] is True
+
+
+def test_duplicate_parent_ids_deduped(client):
+    from services.common.db import get_pool
+
+    agent = _agent(client)
+    b1 = _belief(client, agent["agent_id"], "one")
+    b2 = _belief(
+        client, agent["agent_id"], "two", parent_ids=[b1["belief_id"], b1["belief_id"]]
+    )
+    with get_pool().connection() as conn:
+        rows = conn.execute(
+            "SELECT parent_id FROM derivations WHERE child_id = %s", (b2["belief_id"],)
+        ).fetchall()
+    assert len(rows) == 1
+
+
+def test_embedding_roundtrip(client):
+    from services.common.db import get_pool
+
+    agent = _agent(client)
+    embedding = [0.01] * 1024
+    b = _belief(client, agent["agent_id"], "embedded belief", embedding=embedding)
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT embedding IS NOT NULL FROM beliefs WHERE belief_id = %s",
+            (b["belief_id"],),
+        ).fetchone()
+    assert row[0] is True
+
+
+def test_oversized_content_422(client):
+    agent = _agent(client)
+    r = client.post(
+        "/beliefs",
+        json={"agent_id": agent["agent_id"], "content": "x" * 8193},
+    )
+    assert r.status_code == 422

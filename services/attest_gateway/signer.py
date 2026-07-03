@@ -4,9 +4,14 @@ Development signer only: keys are derived deterministically from the agent name 
 the demo is reproducible (spec section 10). Production signing goes through AWS KMS
 using agents.kms_key_arn (Week 4) behind the same sign(digest) interface; both sign
 the 32-byte chain hash from chain.chain_hash.
+
+dev_signer_for refuses to hand out deterministic dev keys when RECANT_ENV=production,
+raising RuntimeError instead, so the demo signer can never be reached in a production
+deployment by accident.
 """
 
 import hashlib
+import os
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -31,6 +36,8 @@ class Ed25519Signer:
 
 
 def dev_signer_for(agent_name: str) -> Ed25519Signer:
+    if os.environ.get("RECANT_ENV") == "production":
+        raise RuntimeError("dev signer refused: RECANT_ENV=production")
     return Ed25519Signer.from_seed(f"recant-dev-key:{agent_name}".encode())
 
 

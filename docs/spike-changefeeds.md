@@ -98,10 +98,12 @@ configurable there?
 
 - Vector index: migration `db/migrations/0002_vector_index.sql` issues
   `CREATE VECTOR INDEX beliefs_embedding_idx ON beliefs (embedding)`.
-  Support on the local docker image (`cockroachdb/cockroach:latest-v26.2`)
-  is unverified until Task 12 runs migrations against the chaos cluster. If
-  a target cluster rejects it, the fallback is exact nearest-neighbor
-  search (`ORDER BY embedding <-> $1 LIMIT k` without an index), which is
+  Verified Jul 2 (Task 12): Task 12 ran migrations 0001-0003 against the
+  local chaos cluster (`cockroachdb/cockroach:latest-v26.2`, arm64) and
+  `CREATE VECTOR INDEX` applied cleanly. Support on CockroachDB Cloud Basic
+  remains open until U1 provides a live cluster to test against. If a
+  target cluster rejects it, the fallback is exact nearest-neighbor search
+  (`ORDER BY embedding <-> $1 LIMIT k` without an index), which is
   acceptable at demo scale; do not silently skip the migration.
 - Zone configs: deliberately excluded from numbered migrations (decision 7
   in the Week 1 plan header). Self-hosted clusters get

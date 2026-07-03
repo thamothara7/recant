@@ -25,8 +25,10 @@ def test_raises_after_max_retries():
     def fn():
         raise psycopg.errors.SerializationFailure("always")
 
+    sleeps: list[float] = []
     with pytest.raises(psycopg.errors.SerializationFailure):
-        retry_serialization(fn, max_retries=3, sleep=lambda s: None)
+        retry_serialization(fn, max_retries=3, sleep=sleeps.append)
+    assert len(sleeps) == 3 - 1
 
 
 def test_non_retryable_errors_propagate_immediately():
