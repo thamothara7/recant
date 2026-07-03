@@ -6,6 +6,7 @@ import {
   TICKER_SEED,
   taintClosure,
 } from "../data/fixtures";
+import { POISONED_SOURCE, STORY } from "../data/story";
 import type {
   BeliefStatus,
   ChangefeedEvent,
@@ -19,11 +20,42 @@ function initialStatuses(): Record<string, BeliefStatus> {
   return Object.fromEntries(BELIEFS.map((b) => [b.id, b.status]));
 }
 
+// The statuses after the bad fact has been taken back — used by story steps that
+// start in the "already recanted" world so Back/Next is fully deterministic.
+function recantedStatuses(): Record<string, BeliefStatus> {
+  const statuses = initialStatuses();
+  for (const id of taintClosure(POISONED_SOURCE)) statuses[id] = "quarantined";
+  return statuses;
+}
+
+// What the board looked like before any recant — the "past" the rewind shows.
+const SEED_STATUSES = initialStatuses();
+
+// Statuses as they should be DISPLAYED: rewinding shows the pre-recant world,
+// so time travel visibly proves "blocked now, only flagged back then".
+export const useDisplayStatuses = () =>
+  useConsole((s) => (s.aostHours < 0 ? SEED_STATUSES : s.statuses));
+
 let chipId = 1;
 let evtId = TICKER_SEED.length + 1;
 const nowClock = () => clockUtc(new Date().toISOString());
 
+function recantEvents(sourceId: string): ChangefeedEvent[] {
+  const closure = taintClosure(sourceId);
+  const bots = new Set(BELIEFS.filter((b) => closure.includes(b.id)).map((b) => b.agentId));
+  return [
+    { id: evtId++, at: nowClock(), text: `Took back ${closure.length} memories from ${bots.size} bots — all at once`, tone: "quarantine" },
+    { id: evtId++, at: nowClock(), text: "Ops bot's refund #4471 stopped just in time", tone: "evict" },
+  ];
+}
+
+type Mode = "story" | "explore";
+
 interface ConsoleState {
+  mode: Mode;
+  storyStep: number;
+  advanced: boolean;
+
   statuses: Record<string, BeliefStatus>;
   selectedBelief: string | null;
   hoverBelief: string | null;
@@ -38,6 +70,12 @@ interface ConsoleState {
   primitiveLog: JudgePrimitive[];
   ticker: ChangefeedEvent[];
   cluster: ClusterNode[];
+
+  setMode: (mode: Mode) => void;
+  setStoryStep: (n: number) => void;
+  nextStep: () => void;
+  prevStep: () => void;
+  toggleAdvanced: () => void;
 
   selectBelief: (id: string | null) => void;
   hover: (id: string | null) => void;
@@ -54,8 +92,12 @@ interface ConsoleState {
 }
 
 export const useConsole = create<ConsoleState>((set, get) => ({
+  mode: "story",
+  storyStep: 0,
+  advanced: false,
+
   statuses: initialStatuses(),
-  selectedBelief: "bel_forum_claim",
+  selectedBelief: null,
   hoverBelief: null,
   selectedSource: null,
   recanting: false,
@@ -68,6 +110,37 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   primitiveLog: [],
   ticker: TICKER_SEED,
   cluster: CLUSTER,
+
+  setMode: (mode) => {
+    if (mode === "story") {
+      set({ mode });
+      get().setStoryStep(get().storyStep);
+    } else {
+      // Leave the world as the story left it, but return the clock to "now".
+      set({ mode, aostHours: 0 });
+    }
+  },
+
+  // Each story step is applied as a full snapshot: Back always shows the exact
+  // same picture as the first visit, no matter what was clicked in between.
+  setStoryStep: (n) => {
+    const step = STORY[Math.max(0, Math.min(n, STORY.length - 1))];
+    const recanted = !!step.recanted;
+    set({
+      storyStep: Math.max(0, Math.min(n, STORY.length - 1)),
+      statuses: recanted ? recantedStatuses() : initialStatuses(),
+      recantedSource: recanted ? POISONED_SOURCE : null,
+      ticker: recanted ? [...recantEvents(POISONED_SOURCE), ...TICKER_SEED] : TICKER_SEED,
+      selectedBelief: step.select ?? null,
+      selectedSource: null,
+      aostHours: step.aost ?? 0,
+      recanting: false,
+      incidentOpen: false,
+    });
+  },
+  nextStep: () => get().setStoryStep(get().storyStep + 1),
+  prevStep: () => get().setStoryStep(get().storyStep - 1),
+  toggleAdvanced: () => set((s) => ({ advanced: !s.advanced })),
 
   selectBelief: (id) => set({ selectedBelief: id, selectedSource: null }),
   hover: (id) => set({ hoverBelief: id }),
@@ -92,7 +165,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     ).length;
     const inferred = closure.length - explicit - 1;
 
-    set({ recanting: true, incidentOpen: true, selectedSource: sourceId });
+    set({ recanting: true, incidentOpen: true });
     get().flash("VECTOR kNN", `${Math.max(inferred, 0)} inferred · 23ms`, "SELECT belief_id FROM beliefs ORDER BY embedding <-> $1 LIMIT 12");
 
     // The recant sequence (skill 6): threads pulse, UV sweep, then statuses flip
@@ -102,14 +175,12 @@ export const useConsole = create<ConsoleState>((set, get) => ({
       set((s) => {
         const statuses = { ...s.statuses };
         for (const id of closure) statuses[id] = "quarantined";
-        const agents = new Set(
-          BELIEFS.filter((b) => closure.includes(b.id)).map((b) => b.agentId),
-        );
-        const events: ChangefeedEvent[] = [
-          { id: evtId++, at: nowClock(), text: `recant(${sourceId}) · ${closure.length} beliefs quarantined across ${agents.size} agents`, tone: "quarantine" },
-          { id: evtId++, at: nowClock(), text: "ops.action#3 aborted mid-flight · eviction notice delivered", tone: "evict" },
-        ];
-        return { statuses, ticker: [...events, ...s.ticker].slice(0, 40), recanting: false, recantedSource: sourceId };
+        return {
+          statuses,
+          ticker: [...recantEvents(sourceId), ...s.ticker].slice(0, 40),
+          recanting: false,
+          recantedSource: sourceId,
+        };
       });
       get().flash("CHANGEFEED", "→ lambda · 380ms", "CREATE CHANGEFEED FOR beliefs INTO 'webhook-https://…'");
     }, 1150);
@@ -164,7 +235,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   reset: () =>
     set({
       statuses: initialStatuses(),
-      selectedBelief: "bel_forum_claim",
+      selectedBelief: null,
       selectedSource: null,
       recanting: false,
       recantedSource: null,
@@ -173,5 +244,6 @@ export const useConsole = create<ConsoleState>((set, get) => ({
       ticker: TICKER_SEED,
       cluster: CLUSTER,
       primitives: [],
+      storyStep: 0,
     }),
 }));

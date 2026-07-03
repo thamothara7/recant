@@ -2,8 +2,9 @@ import { useEffect } from "react";
 import { AppShell } from "./components/AppShell";
 import { useConsole } from "./state/useConsole";
 
-// Keyboard: J toggles the Judge Overlay, V toggles Recording Mode, R resets,
-// 1-6 fire the proof moments (skill 5). Ignored while typing in a field.
+// Keyboard. Always: arrow keys step the story. Advanced only: J toggles the
+// Judge Overlay, V toggles Recording Mode, R resets, 1-6 fire the proof moments
+// (skill 5). Ignored while typing in a field.
 export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -12,6 +13,11 @@ export function App() {
       // Leave browser/OS chords (Cmd+R, Ctrl+1, ...) alone.
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const s = useConsole.getState();
+      if (s.mode === "story") {
+        if (e.key === "ArrowRight") return s.nextStep();
+        if (e.key === "ArrowLeft") return s.prevStep();
+      }
+      if (!s.advanced) return;
       if (e.key === "j" || e.key === "J") s.toggleOverlay();
       else if (e.key === "v" || e.key === "V") s.toggleRecording();
       else if (e.key === "r" || e.key === "R") s.reset();
@@ -19,6 +25,11 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Apply the first story step's snapshot on load.
+  useEffect(() => {
+    useConsole.getState().setStoryStep(0);
   }, []);
 
   return (

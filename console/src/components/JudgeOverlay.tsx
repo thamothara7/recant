@@ -24,7 +24,7 @@ export function JudgeOverlay() {
   if (!overlayOn) return null;
 
   return (
-    <div className="pointer-events-none fixed right-4 top-14 z-30 flex w-[300px] flex-col items-end gap-2">
+    <div className="pointer-events-none fixed right-4 top-[104px] z-30 flex w-[300px] flex-col items-end gap-2">
       <AnimatePresence>
         {primitives.map((p) => (
           <motion.div

@@ -11,24 +11,27 @@ import type { Belief } from "../data/types";
 import { HashChip } from "./HashChip";
 import { StatusBadge } from "./StatusBadge";
 import { RecantDialog } from "./RecantDialog";
-import { clockUtc } from "../lib/format";
-import { useConsole } from "../state/useConsole";
+import { STATUS_EXPLAIN, TRUST_META, clockUtc } from "../lib/format";
+import { useConsole, useDisplayStatuses } from "../state/useConsole";
 
 const agentName = (id: string) => AGENTS.find((a) => a.id === id)?.name ?? id;
 const beliefById = (id: string) => BELIEFS.find((b) => b.id === id);
 const incidentClosure = taintClosure(INCIDENT.sourceId);
 
+// Plain-English details panel (beginner-first redesign). Answers, in order:
+// what does this memory say, is it OK, where did it come from, where did it
+// spread. Hashes/signatures/regions only appear with the Advanced toggle.
 export function Inspector() {
   const selectedBelief = useConsole((s) => s.selectedBelief);
   const selectedSource = useConsole((s) => s.selectedSource);
-  const statuses = useConsole((s) => s.statuses);
+  const statuses = useDisplayStatuses();
 
   const belief = selectedBelief ? beliefById(selectedBelief) : null;
 
   return (
     <aside className="flex w-[360px] shrink-0 flex-col overflow-y-auto border-l border-hairline bg-[var(--ink-2)]">
       <header className="border-b border-hairline px-4 py-2">
-        <h2 className="label">Inspector</h2>
+        <h2 className="label">{belief ? "Memory details" : selectedSource ? "Source details" : "Details"}</h2>
       </header>
 
       <div className="flex-1 px-4 py-4">
@@ -73,12 +76,13 @@ function ChainRow({
         {marker}
       </span>
       <div className="font-ui text-[12px] text-bond">{title}</div>
-      {detail && <div className="mt-0.5 mono text-[10px] text-bond-dim">{detail}</div>}
+      {detail && <div className="mt-0.5 font-ui text-[10.5px] text-bond-dim">{detail}</div>}
     </li>
   );
 }
 
 function BeliefInspector({ belief, status }: { belief: Belief; status: Belief["status"] }) {
+  const advanced = useConsole((s) => s.advanced);
   const src = belief.sourceId ? SOURCES.find((s) => s.id === belief.sourceId) : null;
   const parents = DERIVATIONS.filter((d) => d.childId === belief.id);
   const children = DERIVATIONS.filter((d) => d.parentId === belief.id);
@@ -87,26 +91,33 @@ function BeliefInspector({ belief, status }: { belief: Belief; status: Belief["s
   return (
     <div>
       <div className="flex items-center justify-between">
-        <span className="mono text-[11px] uppercase tracking-[0.12em] text-bond-dim">
-          {agentName(belief.agentId)} · belief #{belief.seq}
+        <span className="font-ui text-[11px] font-medium uppercase tracking-[0.1em] text-bond-dim">
+          {agentName(belief.agentId)} · memory #{belief.seq}
         </span>
         <StatusBadge status={status} />
       </div>
 
       <p className="mt-2 font-display text-[16px] leading-snug text-bond">{belief.content}</p>
+      <p className="mt-1.5 font-ui text-[11.5px] leading-relaxed text-bond-dim">{STATUS_EXPLAIN[status]}</p>
 
-      <Divider label="Custody chain" />
+      <Divider label="Where it came from" />
       <ol className="flex flex-col gap-2.5">
         <ChainRow
-          marker="§"
-          title={src ? src.label : "Derived belief (no source)"}
-          detail={src ? `${src.trust} · ${src.uri}` : "provenance is upstream beliefs"}
+          marker="1"
+          title={src ? src.label : "Built from other memories"}
+          detail={src ? `${TRUST_META[src.trust].label} source · ${src.uri}` : "see the memories it was based on below"}
           tone={src?.trust === "untrusted" ? "uv" : "bond"}
         />
         <ChainRow
-          marker="✎"
-          title={`Signed by ${agentName(belief.agentId)}`}
-          detail={<HashChip hash={belief.sig.replace("…", belief.hash.slice(8, 24))} label="ed25519" />}
+          marker="2"
+          title={`Saved and signed by the ${agentName(belief.agentId)}`}
+          detail={
+            advanced ? (
+              <HashChip hash={belief.sig.replace("…", belief.hash.slice(8, 24))} label="ed25519" />
+            ) : (
+              "the signature proves nobody edited it afterwards"
+            )
+          }
         />
         {parents.length > 0 ? (
           parents.map((p) => {
@@ -114,49 +125,59 @@ function BeliefInspector({ belief, status }: { belief: Belief; status: Belief["s
             return (
               <ChainRow
                 key={p.parentId}
-                marker="↳"
-                title={pb ? pb.content : p.parentId}
-                detail={`parent · ${p.kind}${p.kind === "inferred" ? ` · cosine ${p.score}` : ""}`}
+                marker="3"
+                title={<>Based on: “{pb ? pb.content : p.parentId}”</>}
+                detail={
+                  p.kind === "inferred"
+                    ? `reworded copy — found by meaning match (${Math.round(p.score * 100)}% similar)`
+                    : "copied directly, with a link back"
+                }
                 tone={p.kind === "inferred" ? "uv" : "bond"}
               />
             );
           })
         ) : (
-          <ChainRow marker="↳" title="Genesis for this agent" detail={<HashChip hash={belief.prevHash} label="prev" />} />
+          <ChainRow marker="3" title="This bot's first note on the topic" detail="not based on any earlier memory" />
         )}
       </ol>
 
-      <Divider label="Attestation" />
-      <Field label="Hash">
-        <HashChip hash={belief.hash} />
-      </Field>
-      <Field label="Prev">
-        <HashChip hash={belief.prevHash} />
-      </Field>
-      <Field label="Created">
-        <span className="mono text-[11px]">{clockUtc(belief.createdAt)} UTC</span>
-      </Field>
-      <Field label="Region">
-        <span className="mono text-[11px]">{belief.region}</span>
-      </Field>
-
       {children.length > 0 && (
         <>
-          <Divider label={`Spreads to ${children.length}`} />
+          <Divider label={`It spread to ${children.length} other ${children.length === 1 ? "memory" : "memories"}`} />
           <ul className="flex flex-col gap-2">
             {children.map((c) => {
               const cb = beliefById(c.childId);
               return (
                 <li key={c.childId} className="rounded-tag border border-hairline bg-panel px-2.5 py-1.5">
                   <div className="font-ui text-[11.5px] text-bond">{cb?.content}</div>
-                  <div className="mt-0.5 mono text-[9px] text-bond-dim">
-                    {agentName(cb?.agentId ?? "")} · {c.kind}
-                    {c.kind === "inferred" ? ` · cosine ${c.score}` : ""}
+                  <div className="mt-0.5 font-ui text-[10px] text-bond-dim">
+                    {agentName(cb?.agentId ?? "")} ·{" "}
+                    {c.kind === "inferred"
+                      ? `reworded copy (${Math.round(c.score * 100)}% similar)`
+                      : "copied directly"}
                   </div>
                 </li>
               );
             })}
           </ul>
+        </>
+      )}
+
+      {advanced && (
+        <>
+          <Divider label="Technical record" />
+          <Field label="Hash">
+            <HashChip hash={belief.hash} />
+          </Field>
+          <Field label="Prev">
+            <HashChip hash={belief.prevHash} />
+          </Field>
+          <Field label="Created">
+            <span className="mono text-[11px]">{clockUtc(belief.createdAt)} UTC</span>
+          </Field>
+          <Field label="Region">
+            <span className="mono text-[11px]">{belief.region}</span>
+          </Field>
         </>
       )}
 
@@ -173,20 +194,23 @@ function SourceInspector({ sourceId }: { sourceId: string }) {
   return (
     <div>
       <div className="flex items-center justify-between">
-        <span className="mono text-[11px] uppercase tracking-[0.12em] text-bond-dim">source</span>
-        <span className="mono text-[11px]" style={{ color: src.trust === "untrusted" ? "var(--quarantined)" : "var(--bond-dim)" }}>
-          {src.trust}
+        <span className="font-ui text-[11px] font-medium uppercase tracking-[0.1em] text-bond-dim">source</span>
+        <span
+          className="font-ui text-[11px] font-medium"
+          style={{ color: TRUST_META[src.trust].token }}
+        >
+          {TRUST_META[src.trust].label}
         </span>
       </div>
       <p className="mt-2 font-display text-[17px] text-bond">{src.label}</p>
       <p className="mono text-[11px] text-bond-dim">{src.uri}</p>
 
-      <Divider label={`Beliefs from this source (${own.length})`} />
+      <Divider label={`Memories that came from here (${own.length})`} />
       <ul className="flex flex-col gap-2">
         {own.map((b) => (
           <li key={b.id} className="rounded-tag border border-hairline bg-panel px-2.5 py-1.5">
             <div className="font-ui text-[11.5px] text-bond">{b.content}</div>
-            <div className="mt-0.5 mono text-[9px] text-bond-dim">{agentName(b.agentId)} · belief #{b.seq}</div>
+            <div className="mt-0.5 font-ui text-[10px] text-bond-dim">{agentName(b.agentId)} · memory #{b.seq}</div>
           </li>
         ))}
       </ul>
@@ -201,7 +225,7 @@ function IncidentPanel() {
     <div className="mt-5 rounded-panel border border-[color-mix(in_srgb,var(--quarantined)_45%,transparent)] bg-[color-mix(in_srgb,var(--quarantined)_7%,var(--panel))] p-3">
       <div className="flex items-center justify-between">
         <span className="label" style={{ color: "var(--quarantined)" }}>
-          Open incident
+          Bad source alert
         </span>
         <span className="mono text-[10px] text-bond-dim">{INCIDENT.id}</span>
       </div>
@@ -224,7 +248,7 @@ function Empty() {
   return (
     <div className="mt-10 text-center">
       <p className="font-ui text-[13px] text-bond-dim">
-        Select a belief on the board, or a source in the fleet rail, to read its custody chain.
+        Click any memory card on the board — or a source on the left — to see its full story.
       </p>
     </div>
   );

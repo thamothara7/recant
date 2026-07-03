@@ -1,5 +1,7 @@
 import { useConsole } from "../state/useConsole";
 
+// Plain header: what the app is, Story/Explore switch, and one Advanced toggle
+// that reveals the judge-facing demo machinery (moments 1-6, overlay, recording).
 const MOMENTS = [
   { n: 1, label: "Write" },
   { n: 2, label: "Derive" },
@@ -10,6 +12,10 @@ const MOMENTS = [
 ];
 
 export function TopBar() {
+  const mode = useConsole((s) => s.mode);
+  const setMode = useConsole((s) => s.setMode);
+  const advanced = useConsole((s) => s.advanced);
+  const toggleAdvanced = useConsole((s) => s.toggleAdvanced);
   const overlayOn = useConsole((s) => s.overlayOn);
   const recordingMode = useConsole((s) => s.recordingMode);
   const toggleOverlay = useConsole((s) => s.toggleOverlay);
@@ -30,37 +36,58 @@ export function TopBar() {
         </div>
         <div className="leading-none">
           <div className="font-display text-[15px] tracking-[0.02em] text-bond">Recant</div>
-          <div className="label !text-[8px] !tracking-[0.22em]">custody console</div>
+          <div className="font-ui text-[10px] text-bond-dim">Take back bad AI memories</div>
         </div>
-        <span className="ml-2 hidden h-4 w-px bg-hairline lg:block" />
-        <span className="hidden font-ui text-[11px] text-bond-dim lg:block">
-          when an agent&apos;s memory goes bad, take it back. everywhere, provably.
-        </span>
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="hidden items-center gap-1 md:flex">
-          {MOMENTS.map((m) => (
+        {/* judge-facing demo machinery, only when Advanced is on */}
+        {advanced && (
+          <>
+            <div className="hidden items-center gap-1 lg:flex">
+              {MOMENTS.map((m) => (
+                <button
+                  key={m.n}
+                  onClick={() => runMoment(m.n)}
+                  className="group flex items-center gap-1 rounded-tag border border-hairline px-2 py-1 font-ui text-[11px] text-bond-dim transition-colors hover:border-uv hover:text-bond"
+                >
+                  <span className="mono text-[9px] text-bond-dim group-hover:text-uv">{m.n}</span>
+                  {m.label}
+                </button>
+              ))}
+              <button
+                onClick={reset}
+                className="rounded-tag border border-hairline px-2 py-1 font-ui text-[11px] text-bond-dim transition-colors hover:text-bond"
+              >
+                <span className="mono text-[9px]">R</span> reset
+              </button>
+            </div>
+            <Toggle label="Judge J" on={overlayOn} onClick={toggleOverlay} />
+            <Toggle label="Rec V" on={recordingMode} onClick={toggleRecording} tone="rec" />
+            <span className="h-4 w-px bg-hairline" />
+          </>
+        )}
+
+        {/* Story / Explore switch */}
+        <div className="flex items-center rounded-panel border border-hairline p-0.5" role="tablist" aria-label="View mode">
+          {(["story", "explore"] as const).map((m) => (
             <button
-              key={m.n}
-              onClick={() => runMoment(m.n)}
-              className="group flex items-center gap-1 rounded-tag border border-hairline px-2 py-1 font-ui text-[11px] text-bond-dim transition-colors hover:border-uv hover:text-bond"
+              key={m}
+              role="tab"
+              aria-selected={mode === m}
+              onClick={() => setMode(m)}
+              className="rounded-tag px-3 py-1 font-ui text-[12.5px] font-medium capitalize transition-colors"
+              style={{
+                background: mode === m ? "var(--uv)" : "transparent",
+                color: mode === m ? "#0e0b1f" : "var(--bond-dim)",
+              }}
             >
-              <span className="mono text-[9px] text-bond-dim group-hover:text-uv">{m.n}</span>
-              {m.label}
+              {m === "story" ? "Story" : "Explore"}
             </button>
           ))}
-          <button
-            onClick={reset}
-            className="rounded-tag border border-hairline px-2 py-1 font-ui text-[11px] text-bond-dim transition-colors hover:text-bond"
-          >
-            <span className="mono text-[9px]">R</span> reset
-          </button>
         </div>
 
-        <span className="h-4 w-px bg-hairline" />
-        <Toggle label="Judge J" on={overlayOn} onClick={toggleOverlay} />
-        <Toggle label="Rec V" on={recordingMode} onClick={toggleRecording} tone="rec" />
+        <Toggle label="Advanced" on={advanced} onClick={toggleAdvanced} />
       </div>
     </header>
   );

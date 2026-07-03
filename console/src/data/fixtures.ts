@@ -12,18 +12,20 @@ import type {
 // the demo tells: a poisoned forum source, its vector-inferred paraphrase with no
 // explicit provenance edge, and an in-flight bad action derived from that paraphrase.
 // Fixed hashes/timestamps keep the board reproducible frame-for-frame (skill 4).
+// All display strings are plain English (beginner-first redesign): "bot", not
+// "agent"; sources carry human labels; jargon lives behind the Advanced toggle.
 
 export const AGENTS: Agent[] = [
-  { id: "researcher", name: "researcher", role: "Ingests + summarizes sources", region: "us-east", pubkey8: "a19f3c7d" },
-  { id: "support", name: "support", role: "Answers refund tickets", region: "us-east", pubkey8: "6b02e4aa" },
-  { id: "ops", name: "ops", role: "Executes refund batches", region: "us-west", pubkey8: "d4f1902c" },
+  { id: "researcher", name: "Research bot", role: "Reads websites and saves notes", region: "us-east", pubkey8: "a19f3c7d" },
+  { id: "support", name: "Support bot", role: "Answers customer questions", region: "us-east", pubkey8: "6b02e4aa" },
+  { id: "ops", name: "Ops bot", role: "Sends refund payments", region: "us-west", pubkey8: "d4f1902c" },
 ];
 
 export const SOURCES: Source[] = [
-  { id: "src_vendor", kind: "web", label: "vendor policy", uri: "vendor.example.com/refund-policy", trust: "verified" },
-  { id: "src_handbook", kind: "doc", label: "support handbook", uri: "s3://recant-evidence/handbook.pdf", trust: "partner" },
-  { id: "src_status", kind: "api", label: "status API", uri: "partner.example.com/status", trust: "public" },
-  { id: "src_forum", kind: "web", label: "forum thread", uri: "forum.example.com/thread/42", trust: "untrusted" },
+  { id: "src_vendor", kind: "web", label: "Official refund policy", uri: "vendor.example.com/refund-policy", trust: "verified" },
+  { id: "src_handbook", kind: "doc", label: "Company support handbook", uri: "s3://recant-evidence/handbook.pdf", trust: "partner" },
+  { id: "src_status", kind: "api", label: "Partner status feed", uri: "partner.example.com/status", trust: "public" },
+  { id: "src_forum", kind: "web", label: "Random forum post", uri: "forum.example.com/thread/42", trust: "untrusted" },
 ];
 
 const T = (s: string) => `2026-07-02T14:${s}Z`;
@@ -81,7 +83,8 @@ export const INCIDENT: Incident = {
   id: "inc_0042",
   sourceId: "src_forum",
   openedBy: "investigator",
-  summary: "Untrusted forum source asserts a 365-day refund window, contradicting verified vendor policy (30 days).",
+  summary:
+    "A random forum post claims refunds last 365 days. The official policy says 30 days. Every memory that grew from that post is a risk.",
 };
 
 export const CLUSTER: ClusterNode[] = [
@@ -92,9 +95,9 @@ export const CLUSTER: ClusterNode[] = [
 
 // Pre-scripted ticker history (newest appended at recant time by the store).
 export const TICKER_SEED: ChangefeedEvent[] = [
-  { id: 1, at: "14:35:31.418", text: "ops.belief#3 written · signature verified", tone: "neutral" },
-  { id: 2, at: "14:34:12.900", text: "ops.belief#1 written · source status API", tone: "neutral" },
-  { id: 3, at: "14:33:58.640", text: "support.belief#3 flagged suspect · vector match 0.91", tone: "neutral" },
+  { id: 1, at: "14:35:31", text: "Ops bot saved memory #3 · signature checked", tone: "neutral" },
+  { id: 2, at: "14:34:12", text: "Ops bot saved memory #1 · from Partner status feed", tone: "neutral" },
+  { id: 3, at: "14:33:58", text: "Support bot memory #3 flagged — 91% meaning-match to forum post", tone: "neutral" },
 ];
 
 // The taint closure of a source: its direct beliefs, then every belief reachable

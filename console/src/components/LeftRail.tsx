@@ -1,9 +1,9 @@
 import { AGENTS, BELIEFS, SOURCES } from "../data/fixtures";
 import type { AgentId, BeliefStatus, TrustTier } from "../data/types";
 import { STATUS_META, TRUST_META } from "../lib/format";
-import { useConsole } from "../state/useConsole";
+import { useConsole, useDisplayStatuses } from "../state/useConsole";
 
-// Worst status among an agent's beliefs decides its rail state.
+// Worst status among a bot's memories decides its rail state.
 const RANK: Record<BeliefStatus, number> = { active: 0, retracted: 1, suspect: 2, quarantined: 3 };
 
 function agentState(agentId: AgentId, statuses: Record<string, BeliefStatus>): BeliefStatus {
@@ -14,14 +14,15 @@ function agentState(agentId: AgentId, statuses: Record<string, BeliefStatus>): B
 }
 
 export function LeftRail() {
-  const statuses = useConsole((s) => s.statuses);
+  const statuses = useDisplayStatuses();
+  const advanced = useConsole((s) => s.advanced);
   const selectedSource = useConsole((s) => s.selectedSource);
   const selectSource = useConsole((s) => s.selectSource);
 
   return (
     <aside className="flex w-[280px] shrink-0 flex-col overflow-y-auto border-r border-hairline bg-[var(--ink-2)]">
       <div className="px-4 pb-2 pt-4">
-        <h2 className="label">Fleet</h2>
+        <h2 className="label">Your bots</h2>
       </div>
       <div className="flex flex-col gap-1.5 px-3">
         {AGENTS.map((a) => {
@@ -37,28 +38,33 @@ export function LeftRail() {
               <div className="flex items-center justify-between">
                 <span className="font-ui text-[13px] font-medium text-bond">{a.name}</span>
                 <span
-                  className="inline-flex items-center gap-1 mono text-[10px]"
+                  className="inline-flex items-center gap-1 font-ui text-[10.5px] font-medium"
                   style={{ color: m.token }}
                 >
                   <span aria-hidden>{m.glyph}</span>
-                  {st === "active" ? "clean" : m.label.toLowerCase()}
+                  {st === "active" ? "all clear" : m.label.toLowerCase()}
                 </span>
               </div>
               <p className="mt-0.5 font-ui text-[11px] leading-tight text-bond-dim">{a.role}</p>
-              <div className="mt-1.5 flex items-center justify-between mono text-[10px] text-bond-dim">
-                <span>{a.region}</span>
-                <span>
-                  {count} beliefs · key {a.pubkey8}
-                </span>
+              <div className="mt-1.5 flex items-center justify-between font-ui text-[10px] text-bond-dim">
+                <span>{count} memories</span>
+                {advanced && (
+                  <span className="mono">
+                    {a.region} · key {a.pubkey8}
+                  </span>
+                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="px-4 pb-2 pt-5">
-        <h2 className="label">Sources</h2>
+      <div className="px-4 pb-1 pt-5">
+        <h2 className="label">Where facts come from</h2>
       </div>
+      <p className="px-4 pb-2 font-ui text-[10.5px] leading-snug text-bond-dim">
+        Click a source to see every memory that grew from it.
+      </p>
       <div className="flex flex-col gap-1 px-3 pb-4">
         {SOURCES.map((src) => {
           const on = selectedSource === src.id;
@@ -89,7 +95,7 @@ function TrustChip({ trust }: { trust: TrustTier }) {
   const m = TRUST_META[trust];
   return (
     <span
-      className="rounded-tag px-1.5 py-[1px] mono text-[9px] uppercase tracking-wider"
+      className="whitespace-nowrap rounded-tag px-1.5 py-[1px] font-ui text-[9px] font-medium uppercase tracking-wider"
       style={{
         color: m.token,
         border: `1px solid color-mix(in srgb, ${m.token} 45%, transparent)`,

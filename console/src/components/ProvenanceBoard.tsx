@@ -11,7 +11,7 @@ import { custodyEdgeIds, layout } from "../lib/graph";
 import { BELIEFS } from "../data/fixtures";
 import { STATUS_META } from "../lib/format";
 import type { BeliefStatus } from "../data/types";
-import { useConsole } from "../state/useConsole";
+import { useConsole, useDisplayStatuses } from "../state/useConsole";
 
 const nodeTypes = { belief: BeliefCard };
 
@@ -67,25 +67,22 @@ function BoardInner() {
 }
 
 export function ProvenanceBoard() {
-  const suspect = useConsole(
-    (s) => Object.values(s.statuses).filter((v) => v === "suspect").length,
-  );
-  const quarantined = useConsole(
-    (s) => Object.values(s.statuses).filter((v) => v === "quarantined").length,
-  );
+  const statuses = useDisplayStatuses();
+  const suspect = Object.values(statuses).filter((v) => v === "suspect").length;
+  const quarantined = Object.values(statuses).filter((v) => v === "quarantined").length;
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col">
       <header className="flex items-center justify-between gap-4 overflow-hidden border-b border-hairline px-4 py-2">
         <div className="flex shrink-0 items-baseline gap-2.5">
-          <h2 className="label !text-bond-dim">Board</h2>
-          <span className="whitespace-nowrap mono text-[11px] text-bond-dim">
-            {BELIEFS.length}
+          <h2 className="label !text-bond-dim">Memory board</h2>
+          <span className="whitespace-nowrap font-ui text-[11px] text-bond-dim">
+            {BELIEFS.length} memories
             {suspect > 0 && (
-              <span style={{ color: "var(--suspect)" }}> · {suspect} suspect</span>
+              <span style={{ color: "var(--suspect)" }}> · {suspect} look wrong</span>
             )}
             {quarantined > 0 && (
-              <span style={{ color: "var(--quarantined)" }}> · {quarantined} quarantined</span>
+              <span style={{ color: "var(--quarantined)" }}> · {quarantined} blocked</span>
             )}
           </span>
         </div>
@@ -124,13 +121,13 @@ function Legend() {
         <svg width="18" height="6" aria-hidden>
           <line x1="0" y1="3" x2="18" y2="3" stroke="var(--hairline-strong)" strokeWidth="1.5" />
         </svg>
-        <span className="label !text-[9px]">explicit</span>
+        <span className="label !text-[9px]">copied directly</span>
       </span>
       <span className="flex items-center gap-1.5">
         <svg width="18" height="6" aria-hidden>
           <line x1="0" y1="3" x2="18" y2="3" stroke="var(--uv-dim)" strokeWidth="1.5" strokeDasharray="2 4" />
         </svg>
-        <span className="label !text-[9px]">inferred</span>
+        <span className="label !text-[9px]">reworded copy</span>
       </span>
     </div>
   );

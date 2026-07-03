@@ -22,9 +22,9 @@ export function ClusterBar() {
   return (
     <div className="flex items-center gap-4 px-4">
       <div className="flex items-center gap-2">
-        <span className="label whitespace-nowrap">Cluster</span>
+        <span className="label whitespace-nowrap">Servers</span>
         <span className="mono text-[10px] text-bond-dim">
-          {upCount}/{cluster.length} up · {regions} regions
+          {upCount}/{cluster.length} healthy · {regions} regions
         </span>
       </div>
 
