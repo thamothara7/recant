@@ -13,3 +13,11 @@ recant-frontend.skill
 
 # Claude Code harness scratch; keep committed skills under .claude/skills/
 .claude/.cc-writes/
+
+# console build + local screenshots
+console/dist/
+console/.playwright-mcp/
+*.png
+console/**/*.tsbuildinfo
+console/vite.config.js
+console/vite.config.d.ts

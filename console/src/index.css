@@ -1,0 +1,247 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Recant console tokens (recant-frontend skill section 2). These CSS variables
+  are the single source of truth; tailwind.config.ts only mirrors them so
+  utilities exist. Do not invent parallel values.
+*/
+:root {
+  --ink: #10161d; /* ledger blue-black base, never pure #000 */
+  --ink-2: #0c1117; /* deepest wells (board void, insets) */
+  --panel: #1a222c; /* raised surfaces, cards */
+  --panel-2: #202a36; /* a step brighter for nested chrome */
+  --bond: #ede7da; /* bond-paper text */
+  --bond-dim: #9aa3ae; /* secondary text, retracted state */
+  --hairline: #2a3442; /* 1px borders */
+  --hairline-strong: #38455a;
+
+  --uv: #8b7ef8; /* the identity accent: UV-lamp violet */
+  --uv-dim: #5b4fb0; /* dimmed thread / inactive reveal */
+  --uv-glow: rgba(139, 126, 248, 0.35);
+
+  /* semantic status: data, never branding */
+  --attested: #3fb27f;
+  --suspect: #e3b341;
+  --quarantined: #e5484d;
+  --retracted: #6b7480;
+
+  --font-display: "Source Serif 4", Georgia, serif;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--bond);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+  Atmosphere: a UV-lamp room. A cold radial wash from the upper center, a fine
+  photographic grain, and a hairline evidence grid. Depth from light, not blur.
+*/
+.room {
+  position: relative;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(139, 126, 248, 0.06), transparent 55%),
+    radial-gradient(90% 60% at 15% 110%, rgba(63, 178, 127, 0.035), transparent 60%),
+    var(--ink);
+}
+.room::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(var(--hairline) 1px, transparent 1px),
+    linear-gradient(90deg, var(--hairline) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-position: -1px -1px;
+  opacity: 0.14;
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 30%, transparent 78%);
+}
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Typographic roles */
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-feature-settings: "zero" 1;
+}
+.label {
+  font-family: var(--font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--bond-dim);
+}
+
+/* Focus: 2px UV ring, always visible (skill quality floor) */
+:focus-visible {
+  outline: 2px solid var(--uv);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Evidence-tag perforation: a torn-stub left edge on belief cards */
+.perf-left {
+  border-left: 2px dotted var(--hairline-strong);
+}
+
+/* Thin, quiet scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* react-flow surface: make it our board, not the library's */
+.react-flow__attribution {
+  display: none;
+}
+.react-flow__edge-path {
+  stroke: var(--hairline-strong);
+  stroke-width: 1.25;
+}
+.react-flow__node {
+  cursor: default;
+}
+.rf-edge-inferred .react-flow__edge-path {
+  stroke: var(--uv-dim);
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+.rf-edge-active .react-flow__edge-path {
+  stroke: var(--uv);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 5px var(--uv-glow));
+}
+
+@keyframes thread-draw {
+  from {
+    stroke-dashoffset: var(--dash, 240);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sweep {
+  0% {
+    transform: translateY(-8%);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(108%);
+    opacity: 0;
+  }
+}
+
+@keyframes ticker-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* AOST scrubber range: hairline track, UV thumb */
+.aost-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--uv-dim), var(--hairline-strong));
+  outline: none;
+}
+.aost-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: var(--uv);
+  border: 2px solid var(--ink);
+  box-shadow: 0 0 8px -1px var(--uv-glow);
+  cursor: pointer;
+}
+.aost-range::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--uv);
+  cursor: pointer;
+}
+
+/* Recording mode: raise contrast, mark the frame (skill 5) */
+.recording {
+  --bond: #f6f2ea;
+}
+.recording::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--quarantined) 55%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
