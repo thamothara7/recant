@@ -9,6 +9,8 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // Leave browser/OS chords (Cmd+R, Ctrl+1, ...) alone.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const s = useConsole.getState();
       if (e.key === "j" || e.key === "J") s.toggleOverlay();
       else if (e.key === "v" || e.key === "V") s.toggleRecording();

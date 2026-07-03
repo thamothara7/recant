@@ -3,7 +3,7 @@ import { useConsole } from "../state/useConsole";
 const TONE: Record<string, string> = {
   neutral: "var(--bond-dim)",
   quarantine: "var(--quarantined)",
-  evict: "var(--uv)",
+  evict: "var(--attested)", // a stopped bad action is a good outcome; --uv stays reserved for interaction
 };
 
 // Live changefeed, newest first (skill 4). Mono textures carry the forensic feel.

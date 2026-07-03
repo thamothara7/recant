@@ -26,6 +26,7 @@ export function BeliefCard({ id, data }: NodeProps<Node<BeliefNodeData>>) {
     <div
       role="button"
       tabIndex={0}
+      aria-label={`${agentName(belief.agentId)} belief ${belief.seq}, ${meta.label}: ${belief.content}`}
       onClick={() => select(id)}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), select(id))}
       onMouseEnter={() => hover(id)}

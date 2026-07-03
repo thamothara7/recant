@@ -10,8 +10,17 @@ import { useConsole } from "../state/useConsole";
 
 // The forensic layout (skill 4): top strip, three columns, bottom strip. Desktop
 // console at >=1280px; the board is always the hero.
+// The demo's live edge is 14:35:31.418 UTC; past mode shows that minus the offset.
+const LIVE_SECONDS = 14 * 3600 + 35 * 60 + 31;
+function aostClock(hoursBack: number): string {
+  const total = LIVE_SECONDS + hoursBack * 3600; // hoursBack is negative
+  const p = (x: number, w = 2) => String(x).padStart(w, "0");
+  return `${p(Math.floor(total / 3600))}:${p(Math.floor((total % 3600) / 60))}:${p(total % 60)}.418`;
+}
+
 export function AppShell() {
-  const pastMode = useConsole((s) => s.aostHours < 0);
+  const aostHours = useConsole((s) => s.aostHours);
+  const pastMode = aostHours < 0;
   const recording = useConsole((s) => s.recordingMode);
 
   return (
@@ -30,7 +39,7 @@ export function AppShell() {
               style={{ background: "color-mix(in srgb, var(--uv) 8%, transparent)", mixBlendMode: "screen" }}
             >
               <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-tag border border-[color-mix(in_srgb,var(--uv)_50%,transparent)] bg-[var(--ink-2)] px-3 py-1 mono text-[11px]" style={{ color: "var(--uv)" }}>
-                VIEWING: 12:32:07.114 UTC
+                VIEWING: {aostClock(aostHours)} UTC
               </div>
             </div>
           )}

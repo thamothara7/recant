@@ -81,6 +81,7 @@ function Toggle({
   return (
     <button
       onClick={onClick}
+      aria-pressed={on}
       className="flex items-center gap-1.5 rounded-tag px-2 py-1 font-ui text-[11px] transition-colors"
       style={{
         color: on ? color : "var(--bond-dim)",

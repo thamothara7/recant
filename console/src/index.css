@@ -222,6 +222,11 @@ body {
   background: var(--uv);
   cursor: pointer;
 }
+/* The range sets outline:none, so restore the quality-floor UV focus ring. */
+.aost-range:focus-visible {
+  outline: 2px solid var(--uv);
+  outline-offset: 3px;
+}
 
 /* Recording mode: raise contrast, mark the frame (skill 5) */
 .recording {

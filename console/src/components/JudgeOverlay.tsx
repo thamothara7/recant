@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { PrimitiveKind } from "../data/types";
 import { useConsole } from "../state/useConsole";
 
@@ -19,6 +19,7 @@ export function JudgeOverlay() {
   const primitives = useConsole((s) => s.primitives);
   const log = useConsole((s) => s.primitiveLog);
   const [openLog, setOpenLog] = useState(false);
+  const reduce = useReducedMotion();
 
   if (!overlayOn) return null;
 
@@ -28,10 +29,10 @@ export function JudgeOverlay() {
         {primitives.map((p) => (
           <motion.div
             key={p.id}
-            initial={{ opacity: 0, x: 16, scale: 0.98 }}
+            initial={reduce ? false : { opacity: 0, x: 16, scale: 0.98 }}
             animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 16 }}
-            transition={{ duration: 0.18 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 16 }}
+            transition={{ duration: reduce ? 0 : 0.18 }}
             className="pointer-events-auto w-full rounded-tag border bg-[color-mix(in_srgb,var(--panel)_92%,black)] px-3 py-2 shadow-lift backdrop-blur-sm"
             style={{ borderColor: `color-mix(in srgb, ${KIND_TOKEN[p.kind]} 55%, transparent)` }}
           >

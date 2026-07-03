@@ -13,7 +13,7 @@ export const STATUS_META: Record<
 
 export const TRUST_META: Record<TrustTier, { label: string; token: string }> = {
   verified: { label: "verified", token: "var(--attested)" },
-  partner: { label: "partner", token: "var(--uv)" },
+  partner: { label: "partner", token: "var(--bond-dim)" },
   public: { label: "public", token: "var(--bond-dim)" },
   untrusted: { label: "untrusted", token: "var(--quarantined)" },
 };

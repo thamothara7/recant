@@ -33,6 +33,7 @@ export function ClusterBar() {
           <button
             key={n.id}
             title={n.up ? `${n.region} · click to kill` : `${n.region} · click to revive`}
+            aria-label={`${n.region} node, ${n.up ? "up, activate to kill" : "down, activate to revive"}`}
             onClick={() => (n.up ? killNode(n.id) : reviveNode(n.id))}
             className="flex items-center gap-1 rounded-tag border px-1.5 py-1 mono text-[9px] transition-colors"
             style={{

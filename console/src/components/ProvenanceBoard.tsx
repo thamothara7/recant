@@ -9,6 +9,8 @@ import {
 import { BeliefCard } from "./BeliefCard";
 import { custodyEdgeIds, layout } from "../lib/graph";
 import { BELIEFS } from "../data/fixtures";
+import { STATUS_META } from "../lib/format";
+import type { BeliefStatus } from "../data/types";
 import { useConsole } from "../state/useConsole";
 
 const nodeTypes = { belief: BeliefCard };
@@ -47,7 +49,7 @@ function BoardInner() {
       proOptions={{ hideAttribution: true }}
       onPaneClick={() => useConsole.getState().selectBelief(null)}
     >
-      <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#233042" />
+      <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#2A3442" />
       {recanting && (
         <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
           <div
@@ -74,11 +76,11 @@ export function ProvenanceBoard() {
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-hairline px-4 py-2">
-        <div className="flex items-baseline gap-3">
-          <h2 className="label !text-bond-dim">Provenance Board</h2>
-          <span className="mono text-[11px] text-bond-dim">
-            {BELIEFS.length} beliefs
+      <header className="flex items-center justify-between gap-4 overflow-hidden border-b border-hairline px-4 py-2">
+        <div className="flex shrink-0 items-baseline gap-2.5">
+          <h2 className="label !text-bond-dim">Board</h2>
+          <span className="whitespace-nowrap mono text-[11px] text-bond-dim">
+            {BELIEFS.length}
             {suspect > 0 && (
               <span style={{ color: "var(--suspect)" }}> · {suspect} suspect</span>
             )}
@@ -99,20 +101,36 @@ export function ProvenanceBoard() {
   );
 }
 
+const LEGEND_STATUSES: BeliefStatus[] = ["active", "suspect", "quarantined"];
+
 function Legend() {
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex shrink-0 items-center gap-2.5">
+      {LEGEND_STATUSES.map((s) => {
+        const m = STATUS_META[s];
+        return (
+          <span key={s} className="flex items-center gap-1" title={m.label}>
+            <span aria-hidden style={{ color: m.token, fontSize: 11 }}>
+              {m.glyph}
+            </span>
+            <span className="label !text-[9px]" style={{ color: m.token }}>
+              {m.label}
+            </span>
+          </span>
+        );
+      })}
+      <span className="mx-0.5 h-3 w-px bg-hairline" />
       <span className="flex items-center gap-1.5">
-        <svg width="22" height="6" aria-hidden>
-          <line x1="0" y1="3" x2="22" y2="3" stroke="var(--hairline-strong)" strokeWidth="1.5" />
+        <svg width="18" height="6" aria-hidden>
+          <line x1="0" y1="3" x2="18" y2="3" stroke="var(--hairline-strong)" strokeWidth="1.5" />
         </svg>
         <span className="label !text-[9px]">explicit</span>
       </span>
       <span className="flex items-center gap-1.5">
-        <svg width="22" height="6" aria-hidden>
-          <line x1="0" y1="3" x2="22" y2="3" stroke="var(--uv-dim)" strokeWidth="1.5" strokeDasharray="2 4" />
+        <svg width="18" height="6" aria-hidden>
+          <line x1="0" y1="3" x2="18" y2="3" stroke="var(--uv-dim)" strokeWidth="1.5" strokeDasharray="2 4" />
         </svg>
-        <span className="label !text-[9px]">inferred (vector)</span>
+        <span className="label !text-[9px]">inferred</span>
       </span>
     </div>
   );

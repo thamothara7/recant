@@ -53,22 +53,31 @@ export function custodyEdgeIds(selectedId: string | null): Set<string> {
   const out = new Set<string>();
   if (!selectedId) return out;
 
+  // visited guards keep the walk finite even if the derivation graph ever cycles.
+  const upSeen = new Set([selectedId]);
   const up = [selectedId];
   while (up.length) {
     const cur = up.pop()!;
     for (const d of DERIVATIONS)
       if (d.childId === cur) {
         out.add(`${d.parentId}->${d.childId}`);
-        up.push(d.parentId);
+        if (!upSeen.has(d.parentId)) {
+          upSeen.add(d.parentId);
+          up.push(d.parentId);
+        }
       }
   }
+  const downSeen = new Set([selectedId]);
   const down = [selectedId];
   while (down.length) {
     const cur = down.pop()!;
     for (const d of DERIVATIONS)
       if (d.parentId === cur) {
         out.add(`${d.parentId}->${d.childId}`);
-        down.push(d.childId);
+        if (!downSeen.has(d.childId)) {
+          downSeen.add(d.childId);
+          down.push(d.childId);
+        }
       }
   }
   return out;
