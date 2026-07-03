@@ -10,3 +10,6 @@ dist/
 RECANT_SYSTEM_PROMPT.md
 recant-frontend-SKILL.md
 recant-frontend.skill
+
+# Claude Code harness scratch; keep committed skills under .claude/skills/
+.claude/.cc-writes/

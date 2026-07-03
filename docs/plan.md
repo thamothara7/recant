@@ -42,6 +42,7 @@ Items that cannot be completed by the agent; the human must act.
 
 | ID | Item | Status |
 |----|------|--------|
+| U0 | Restart Claude Code so the newly installed CockroachDB Agent Skills are discovered (install itself is done; see `docs/skills-setup.md`) | pending (agent-side install done Jul 3) |
 | U1 | CockroachDB Cloud signup (https://cockroachlabs.cloud/signup) and cluster creation | pending |
 | U2 | Install and authenticate ccloud CLI; create service account | pending |
 | U3 | AWS account credentials (Bedrock, Lambda, S3, EventBridge access) and `aws` CLI install | pending |
