@@ -14,7 +14,7 @@ Status values (only these): `pending`, `in progress`, `done`, `blocked`, `cut`.
 | W2 | - | Taint engine (CTE + vector) + quarantine txn + tests | pending |
 | W3 | - | Fleet agents on LangChain-CockroachDB + fanout Lambda/EventBridge + eviction | pending |
 | W4 | - | Forensics API (AOST) + S3 archive + Bedrock affidavits | pending |
-| W5 | - | Console per `recant-frontend` skill + chaos cluster + judge overlay | pending |
+| W5 | - | Console per `recant-frontend` skill + chaos cluster + judge overlay | started early (Jul 3): working shell, Provenance Board, recant flow, Judge Overlay against fixtures |
 | W6 | Aug 10-16 | Seed at scale, record video, deploy demo URL, README polish, submit Aug 16 (never on deadline day) | pending |
 
 ## Decision log
@@ -67,6 +67,14 @@ Items that cannot be completed by the agent; the human must act.
 - Seed via gateway API: 3 agents, 4 sources, 7 beliefs; chains verify; 2 explicit derivation edges; 1 untrusted-source belief carries ttl_expire_at.
 - Node-kill rehearsal (proof moment 6): chain verification answered with roach3 killed; roach3 restarted after.
 - Known cosmetic warnings: starlette TestClient httpx deprecation; psycopg_pool default-open deprecation.
+
+## Console (W5, started early Jul 3)
+
+- `console/`: Vite + React + TS + Tailwind, exact recant-frontend tokens, self-hosted fonts.
+- Working: Provenance Board (react-flow + dagre, evidence-tag cards, custody-thread edges), Inspector (custody chain + recant dialog), left rail, AOST scrubber, changefeed ticker, cluster bar with node-kill + live query counter, Judge Overlay + primitive log, Demo Director (keys 1-6), J/V/R toggles.
+- Data: deterministic fixtures extending `ops/seed/seed.py` into the full contamination story; no live backend yet (forensics read APIs land W2-W4). The fixture layer mirrors the future API shape for a clean swap.
+- Verified: `npm run build` clean; recant sequence exercised end to end at 1280x720.
+- Next for the console: wire to the live gateway/forensics APIs as they land; full recant motion sequence (thread pulse + sweep timing polish); Recording Mode countdown; mobile read-only incident summary.
 
 ### Deferred to W2
 
