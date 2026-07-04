@@ -5,12 +5,14 @@ chain head FOR UPDATE (serializing appends per agent), computes the chain hash,
 signs it, inserts the belief plus explicit derivation edges, and advances the head.
 """
 
+import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from uuid import UUID
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from services.attest_gateway import chain
 from services.attest_gateway.models import (
@@ -23,12 +25,27 @@ from services.attest_gateway.models import (
     SourceOut,
 )
 from services.attest_gateway.signer import dev_signer_for, verify_signature
+from services.common.config import cors_origins
 from services.common.db import run_txn
 from services.common.vectors import to_vector_literal
 
-UNTRUSTED_TTL = timedelta(days=7)
+# Env-configurable: TTL deletes are blocked by derivation FKs anyway (rows
+# persist, job errors — README failure-modes table), and the deployed demo must
+# outlive the judging window, so W6 sets this to 90 (design review 2026-07-03).
+UNTRUSTED_TTL = timedelta(days=float(os.environ.get("RECANT_UNTRUSTED_TTL_DAYS", "7")))
 
 app = FastAPI(title="recant attest-gateway")
+
+# Proof moment 1 (attested write) chip: the console fetches X-Recant-Primitive
+# cross-origin from localhost:5173, so it must be CORS-exposed here just as the
+# quarantine service exposes it (review 2026-07-03).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins(),
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Recant-Primitive"],
+)
 
 
 @app.middleware("http")
@@ -81,10 +98,15 @@ def create_source(body: SourceIn) -> SourceOut:
 
 @app.post("/beliefs", response_model=BeliefOut, status_code=201)
 def create_belief(body: BeliefIn) -> BeliefOut:
-    ts = datetime.now(timezone.utc)
     parent_ids = list(dict.fromkeys(body.parent_ids))
 
     def txn(conn: psycopg.Connection) -> BeliefOut:
+        # One clock domain: stamp created_at from the DATABASE clock, same source
+        # as sources.created_at (DEFAULT now()). The taint window compares the two
+        # (engine.py), so a client wall clock would let host/DB skew shift the
+        # contamination boundary (review 2026-07-03). now() is the txn timestamp,
+        # stable across a 40001 retry within the attempt.
+        ts = conn.execute("SELECT now()").fetchone()[0]
         row = conn.execute(
             "SELECT name, head_hash, head_seq FROM agents WHERE agent_id = %s FOR UPDATE",
             (body.agent_id,),
@@ -103,6 +125,25 @@ def create_belief(body: BeliefIn) -> BeliefOut:
             if src[0] == "untrusted":
                 ttl_expire_at = ts + UNTRUSTED_TTL
 
+        # Post-recant residue check (design review 2026-07-03): a new belief
+        # citing a recanted source or deriving from a quarantined parent is born
+        # 'suspect' rather than 'active'. This is the write-path half of the
+        # residue story; the W3 changefeed eviction is the runtime half.
+        status = "active"
+        if body.source_id is not None:
+            if conn.execute(
+                "SELECT 1 FROM incidents WHERE source_id = %s LIMIT 1", (body.source_id,)
+            ).fetchone():
+                status = "suspect"
+        if status == "active" and parent_ids:
+            tainted_parent = conn.execute(
+                "SELECT 1 FROM beliefs WHERE belief_id = ANY(%s)"
+                " AND status IN ('suspect', 'quarantined') LIMIT 1",
+                (parent_ids,),
+            ).fetchone()
+            if tainted_parent:
+                status = "suspect"
+
         prev = bytes(head_hash) if head_hash is not None else chain.GENESIS
         seq = int(head_seq) + 1
         payload = chain.canonical_payload(
@@ -120,12 +161,13 @@ def create_belief(body: BeliefIn) -> BeliefOut:
         belief_id = conn.execute(
             """
             INSERT INTO beliefs
-                (agent_id, seq, content, embedding, created_at, sig, prev_hash, hash,
-                 source_id, ttl_expire_at)
-            VALUES (%s, %s, %s, %s::vector, %s, %s, %s, %s, %s, %s)
+                (agent_id, seq, content, embedding, status, created_at, sig, prev_hash,
+                 hash, source_id, ttl_expire_at)
+            VALUES (%s, %s, %s, %s::vector, %s, %s, %s, %s, %s, %s, %s)
             RETURNING belief_id
             """,
-            (body.agent_id, seq, body.content, emb, ts, sig, prev, h, body.source_id, ttl_expire_at),
+            (body.agent_id, seq, body.content, emb, status, ts, sig, prev, h,
+             body.source_id, ttl_expire_at),
         ).fetchone()[0]
 
         for pid in parent_ids:
@@ -143,7 +185,7 @@ def create_belief(body: BeliefIn) -> BeliefOut:
             agent_id=body.agent_id,
             seq=seq,
             content=body.content,
-            status="active",
+            status=status,
             created_at=ts,
             hash=h.hex(),
             prev_hash=prev.hex(),

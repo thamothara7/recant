@@ -41,6 +41,18 @@ def dev_signer_for(agent_name: str) -> Ed25519Signer:
     return Ed25519Signer.from_seed(f"recant-dev-key:{agent_name}".encode())
 
 
+def dev_action_signer_for(actor: str) -> Ed25519Signer:
+    """Signer for quarantine actions, in a keyspace DISJOINT from agent belief
+    keys (domain separation). Actor is an unauthenticated request field: without
+    separation a POST /recant with actor='researcher' would forge a signature
+    that verifies under agent researcher's belief-chain pubkey (review
+    2026-07-03). Actions verify against this namespace only; a registry that pins
+    actor -> KMS key ARN replaces it in W4."""
+    if os.environ.get("RECANT_ENV") == "production":
+        raise RuntimeError("dev signer refused: RECANT_ENV=production")
+    return Ed25519Signer.from_seed(f"recant-dev-action:{actor}".encode())
+
+
 def verify_signature(public_key: bytes, digest: bytes, sig: bytes) -> bool:
     try:
         Ed25519PublicKey.from_public_bytes(public_key).verify(sig, digest)
