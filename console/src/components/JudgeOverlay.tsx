@@ -1,19 +1,13 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import type { PrimitiveKind } from "../data/types";
 import { useConsole } from "../state/useConsole";
+import { Button } from "./m3";
 
-// The judging criterion "which CockroachDB primitives did you use" rendered live.
-// Chips flash on X-Recant-Primitive responses; the log keeps the SQL peek.
-const KIND_TOKEN: Record<PrimitiveKind, string> = {
-  "SERIALIZABLE TXN": "var(--attested)",
-  "VECTOR kNN": "var(--uv)",
-  CHANGEFEED: "var(--suspect)",
-  AOST: "var(--uv)",
-  "ROW TTL": "var(--bond-dim)",
-  "MCP TOOL": "var(--attested)",
-};
-
+// The judging criterion "which CockroachDB primitives did you use" rendered
+// live. Chips flash on X-Recant-Primitive responses as M3 snackbars, docked
+// bottom-leading OVER THE BOARD (rendered inside the board card by AppShell)
+// so they never occlude the rail or the inspector; the slide-out log keeps the
+// SQL peek and opens upward from its toggle.
 export function JudgeOverlay() {
   const overlayOn = useConsole((s) => s.overlayOn);
   const primitives = useConsole((s) => s.primitives);
@@ -24,55 +18,48 @@ export function JudgeOverlay() {
   if (!overlayOn) return null;
 
   return (
-    <div className="pointer-events-none fixed right-4 top-[104px] z-30 flex w-[300px] flex-col items-end gap-2">
+    <div className="pointer-events-none absolute bottom-3 left-3 z-30 flex w-[300px] flex-col items-start gap-2">
       <AnimatePresence>
         {primitives.map((p) => (
           <motion.div
             key={p.id}
-            initial={reduce ? false : { opacity: 0, x: 16, scale: 0.98 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 16 }}
+            initial={reduce ? false : { opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
             transition={{ duration: reduce ? 0 : 0.18 }}
-            className="pointer-events-auto w-full rounded-tag border bg-[color-mix(in_srgb,var(--panel)_92%,black)] px-3 py-2 shadow-lift backdrop-blur-sm"
-            style={{ borderColor: `color-mix(in srgb, ${KIND_TOKEN[p.kind]} 55%, transparent)` }}
+            className="pointer-events-auto flex w-full flex-col gap-0.5 rounded-md3-sm bg-inverse-surface px-4 py-3 text-inverse-on-surface shadow-elevation-3"
           >
-            <div className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: KIND_TOKEN[p.kind] }} />
-              <span className="mono text-[11px] font-medium tracking-wide" style={{ color: KIND_TOKEN[p.kind] }}>
-                {p.kind}
-              </span>
-              <span className="ml-auto mono text-[10px] text-bond-dim">{p.detail}</span>
-            </div>
-            <div className="mt-1 truncate mono text-[9.5px] text-bond-dim/80">{p.sql}</div>
+            <span className="text-label-lg font-medium">{p.kind}</span>
+            <span className="mono truncate text-label-md opacity-90">{p.detail}</span>
           </motion.div>
         ))}
       </AnimatePresence>
 
       {log.length > 0 && (
-        <div className="pointer-events-auto w-full">
-          <button
-            onClick={() => setOpenLog((v) => !v)}
-            className="ml-auto flex items-center gap-1.5 rounded-tag border border-hairline bg-panel px-2 py-1 mono text-[10px] text-bond-dim hover:text-bond"
-          >
-            <span>primitive log</span>
-            <span className="text-uv">{log.length}</span>
-            <span aria-hidden>{openLog ? "▾" : "▸"}</span>
-          </button>
+        <div className="pointer-events-auto relative flex w-full flex-col items-start">
           {openLog && (
-            <div className="mt-1 max-h-[280px] w-full overflow-y-auto rounded-panel border border-hairline bg-[var(--ink-2)] p-2">
+            <div className="absolute bottom-full mb-1 max-h-[280px] w-full overflow-y-auto rounded-md3-lg border border-outline-variant bg-surface p-2 shadow-elevation-2">
               {log.map((p) => (
-                <div key={p.id} className="border-b border-hairline/60 py-1.5 last:border-0">
+                <div key={p.id} className="border-b border-outline-variant py-2 last:border-0">
                   <div className="flex items-center gap-2">
-                    <span className="mono text-[10px]" style={{ color: KIND_TOKEN[p.kind] }}>
-                      {p.kind}
-                    </span>
-                    <span className="ml-auto mono text-[9px] text-bond-dim">{p.detail}</span>
+                    <span className="text-label-md font-medium text-on-surface">{p.kind}</span>
+                    <span className="mono ml-auto text-label-sm text-on-surface-variant">{p.detail}</span>
                   </div>
-                  <div className="mono text-[9px] leading-tight text-bond-dim/80">{p.sql}</div>
+                  <div className="mono mt-1 rounded-md3-xs bg-surface-container-low p-2 text-body-sm text-on-surface-variant">
+                    {p.sql}
+                  </div>
                 </div>
               ))}
             </div>
           )}
+          <Button
+            variant="text"
+            icon={openLog ? "expand_more" : "expand_less"}
+            onClick={() => setOpenLog((v) => !v)}
+          >
+            primitive log
+            <span className="mono">{log.length}</span>
+          </Button>
         </div>
       )}
     </div>

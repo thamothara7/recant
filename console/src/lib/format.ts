@@ -1,16 +1,42 @@
 import type { BeliefStatus, TrustTier } from "../data/types";
 
-// Status is NEVER color alone (skill 2 + 9): every surface renders color + glyph + label.
-// Labels are plain English (beginner-first redesign); the enum values still mirror
-// the database schema so the fixture layer swaps cleanly for the real API.
+// Status is NEVER color alone: every surface renders icon + label + color.
+// Colors are M3 roles; icons are Material Symbols names. `container` and
+// `onContainer` style tonal chips; `color` is for icons/text on plain surfaces.
+// Labels are plain English; the enum values still mirror the database schema
+// so the fixture layer swaps cleanly for the real API.
 export const STATUS_META: Record<
   BeliefStatus,
-  { label: string; glyph: string; token: string }
+  { label: string; icon: string; color: string; container: string; onContainer: string }
 > = {
-  active: { label: "Healthy", glyph: "✓", token: "var(--attested)" },
-  suspect: { label: "Looks wrong", glyph: "⚠", token: "var(--suspect)" },
-  quarantined: { label: "Blocked", glyph: "⛔", token: "var(--quarantined)" },
-  retracted: { label: "Withdrawn", glyph: "∅", token: "var(--retracted)" },
+  active: {
+    label: "Healthy",
+    icon: "check_circle",
+    color: "var(--md-success)",
+    container: "var(--md-success-container)",
+    onContainer: "var(--md-on-success-container)",
+  },
+  suspect: {
+    label: "Looks wrong",
+    icon: "warning",
+    color: "var(--md-warning)",
+    container: "var(--md-warning-container)",
+    onContainer: "var(--md-on-warning-container)",
+  },
+  quarantined: {
+    label: "Blocked",
+    icon: "block",
+    color: "var(--md-error)",
+    container: "var(--md-error-container)",
+    onContainer: "var(--md-on-error-container)",
+  },
+  retracted: {
+    label: "Withdrawn",
+    icon: "do_not_disturb_on",
+    color: "var(--md-outline)",
+    container: "var(--md-surface-container-highest)",
+    onContainer: "var(--md-on-surface-variant)",
+  },
 };
 
 // One-sentence explanation per status, shown in the details panel.
@@ -21,19 +47,19 @@ export const STATUS_EXPLAIN: Record<BeliefStatus, string> = {
   retracted: "The bot that wrote this memory withdrew it.",
 };
 
-export const TRUST_META: Record<TrustTier, { label: string; token: string }> = {
-  verified: { label: "trusted", token: "var(--attested)" },
-  partner: { label: "partner", token: "var(--bond-dim)" },
-  public: { label: "public", token: "var(--bond-dim)" },
-  untrusted: { label: "not trusted", token: "var(--quarantined)" },
+export const TRUST_META: Record<TrustTier, { label: string; color: string }> = {
+  verified: { label: "trusted", color: "var(--md-success)" },
+  partner: { label: "partner", color: "var(--md-on-surface-variant)" },
+  public: { label: "public", color: "var(--md-on-surface-variant)" },
+  untrusted: { label: "not trusted", color: "var(--md-error)" },
 };
 
-// Hashes are mono and truncated to 8 chars with a copy affordance (skill 2).
+// Hashes are mono and truncated to 8 chars with a copy affordance.
 export function short(hash: string, n = 8): string {
   return hash.slice(0, n);
 }
 
-// Timestamps are UTC HH:MM:SS.mmm (skill 2).
+// Timestamps are UTC HH:MM:SS.mmm, always mono.
 export function clockUtc(iso: string): string {
   const d = new Date(iso);
   const p = (x: number, w = 2) => String(x).padStart(w, "0");

@@ -1,4 +1,5 @@
 import { useConsole } from "../state/useConsole";
+import { Button, Chip, Icon } from "./m3";
 
 // The time rewind (AS OF SYSTEM TIME underneath). 0 = now; dragging back shows
 // the board exactly as it was then. Plain words; the SQL lives in the Judge
@@ -11,8 +12,9 @@ export function AostScrubber() {
   const live = aost === 0;
 
   return (
-    <div className="flex h-11 items-center gap-4 border-b border-hairline bg-[var(--ink-2)] px-4">
-      <span className="label whitespace-nowrap">Rewind time</span>
+    <div className="flex h-12 items-center gap-3 px-6">
+      <Icon name="history" size={18} className="text-on-surface-variant" />
+      <span className="whitespace-nowrap text-label-lg font-medium text-on-surface-variant">Rewind time</span>
 
       <div className="relative flex-1">
         <input
@@ -27,35 +29,29 @@ export function AostScrubber() {
         />
         <div className="pointer-events-none mt-1 flex justify-between">
           {MARKS.map((m) => (
-            <span key={m} className="font-ui text-[9px] text-bond-dim/70">
+            <span key={m} className="text-label-md font-medium text-on-surface-variant">
               {m === 0 ? "now" : `${-m}h ago`}
             </span>
           ))}
         </div>
       </div>
 
-      <span
-        className="inline-flex items-center gap-1.5 rounded-tag px-2 py-1 font-ui text-[11px] font-medium"
-        style={{
-          color: live ? "var(--attested)" : "var(--uv)",
-          border: `1px solid color-mix(in srgb, ${live ? "var(--attested)" : "var(--uv)"} 40%, transparent)`,
-          background: `color-mix(in srgb, ${live ? "var(--attested)" : "var(--uv)"} 10%, transparent)`,
-        }}
-      >
-        <span
-          className="h-1.5 w-1.5 rounded-full"
-          style={{ background: live ? "var(--attested)" : "var(--uv)" }}
-        />
-        {live ? "Now" : `Viewing ${-aost}h ago`}
-      </span>
-
-      <button
-        disabled={live}
-        className="rounded-tag border border-hairline px-2 py-1 font-ui text-[11px] text-bond-dim transition-colors hover:text-bond disabled:opacity-40"
-        onClick={() => setAost(0)}
-      >
-        Back to now
-      </button>
+      {/* At the live edge the chip says it all; a disabled ghost button would
+          just read as broken text in a paused frame. */}
+      {live ? (
+        <Chip label="Live" />
+      ) : (
+        <>
+          <Chip
+            label={`${-aost}h ago`}
+            container="var(--md-secondary-container)"
+            onContainer="var(--md-on-secondary-container)"
+          />
+          <Button variant="text" onClick={() => setAost(0)}>
+            Back to now
+          </Button>
+        </>
+      )}
     </div>
   );
 }

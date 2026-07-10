@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useConsole } from "../state/useConsole";
+import { Icon } from "./m3";
 
-// Cluster health + a live forensics-query counter. Killing a node flips it to ⛔
-// but the counter keeps climbing, the visual argument for survivability (skill 4,
-// proof moment 6).
+// Cluster health + a live forensics-query counter. Killing a node flips it to
+// down, but the counter keeps climbing, the visual argument for survivability
+// (skill 4, proof moment 6).
 export function ClusterBar() {
   const cluster = useConsole((s) => s.cluster);
   const killNode = useConsole((s) => s.killNode);
@@ -20,37 +21,42 @@ export function ClusterBar() {
   }, [upCount]);
 
   return (
-    <div className="flex items-center gap-4 px-4">
+    <div className="flex items-center gap-4">
       <div className="flex items-center gap-2">
-        <span className="label whitespace-nowrap">Servers</span>
-        <span className="mono text-[10px] text-bond-dim">
+        <span className="whitespace-nowrap text-label-md font-medium text-on-surface-variant">Servers</span>
+        <span className="whitespace-nowrap text-body-sm text-on-surface-variant">
           {upCount}/{cluster.length} healthy · {regions} regions
         </span>
       </div>
 
       <div className="flex items-center gap-1.5">
         {cluster.map((n) => (
-          <button
+          <span
             key={n.id}
-            title={n.up ? `${n.region} · click to kill` : `${n.region} · click to revive`}
-            aria-label={`${n.region} node, ${n.up ? "up, activate to kill" : "down, activate to revive"}`}
-            onClick={() => (n.up ? killNode(n.id) : reviveNode(n.id))}
-            className="flex items-center gap-1 rounded-tag border px-1.5 py-1 mono text-[9px] transition-colors"
-            style={{
-              borderColor: n.up ? "color-mix(in srgb, var(--attested) 40%, transparent)" : "var(--quarantined)",
-              color: n.up ? "var(--attested)" : "var(--quarantined)",
-              background: n.up ? "transparent" : "color-mix(in srgb, var(--quarantined) 12%, transparent)",
-            }}
+            className="flex h-7 items-center gap-1.5 rounded-md3-sm border border-outline-variant px-2"
           >
-            <span aria-hidden>{n.up ? "●" : "⛔"}</span>
-            {n.region}
-          </button>
+            <Icon
+              name="dns"
+              size={14}
+              style={{ color: n.up ? "var(--md-success)" : "var(--md-error)" }}
+            />
+            <span className="text-label-sm font-medium text-on-surface-variant">{n.up ? "up" : "down"}</span>
+            <span className="mono text-label-sm text-on-surface-variant">{n.region}</span>
+            <button
+              title={n.up ? `${n.region} · click to kill` : `${n.region} · click to revive`}
+              aria-label={`${n.region} node, ${n.up ? "up, activate to kill" : "down, activate to revive"}`}
+              onClick={() => (n.up ? killNode(n.id) : reviveNode(n.id))}
+              className="state-layer -mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant"
+            >
+              <Icon name="power_settings_new" size={14} />
+            </button>
+          </span>
         ))}
       </div>
 
       <div className="flex items-center gap-1.5 whitespace-nowrap">
-        <span className="mono text-[13px] tabular-nums text-bond">{queries.toLocaleString()}</span>
-        <span className="label !text-[9px]">forensics queries</span>
+        <span className="mono text-label-md tabular-nums text-on-surface">{queries.toLocaleString()}</span>
+        <span className="text-label-sm font-medium text-on-surface-variant">forensics queries</span>
       </div>
     </div>
   );

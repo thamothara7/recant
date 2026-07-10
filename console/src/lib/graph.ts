@@ -4,7 +4,7 @@ import { BELIEFS, DERIVATIONS } from "../data/fixtures";
 import type { Belief } from "../data/types";
 
 export const NODE_W = 244;
-export const NODE_H = 96;
+export const NODE_H = 114;
 
 export interface BeliefNodeData extends Record<string, unknown> {
   belief: Belief;

@@ -1,15 +1,15 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 
-// Self-hosted fonts (offline, no CDN). Weights chosen per role:
-// Source Serif 4 600 (display), IBM Plex Sans 400/500/600 (UI),
-// IBM Plex Mono 400/500 (data).
-import "@fontsource/source-serif-4/600.css";
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
-import "@fontsource/ibm-plex-sans/600.css";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
+// Self-hosted fonts (offline, no CDN). Material 3 roles: Roboto 400/500/700
+// for the type scale, Roboto Mono 400/500 for database data (hashes,
+// timestamps, SQL), Material Symbols Rounded for icons.
+import "@fontsource/roboto/400.css";
+import "@fontsource/roboto/500.css";
+import "@fontsource/roboto/700.css";
+import "@fontsource/roboto-mono/400.css";
+import "@fontsource/roboto-mono/500.css";
+import "material-symbols/rounded.css";
 
 import "@xyflow/react/dist/style.css";
 import "./index.css";

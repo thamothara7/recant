@@ -1,7 +1,11 @@
+import { useEffect, useState } from "react";
 import { useConsole } from "../state/useConsole";
+import { Icon, IconButton } from "./m3";
 
-// Plain header: what the app is, Story/Explore switch, and one Advanced toggle
-// that reveals the judge-facing demo machinery (moments 1-6, overlay, recording).
+// Product chrome stays product chrome: brand, Story/Explore switch, theme,
+// Advanced. The judge-facing demo machinery (moments 1-6, overlay, recording)
+// lives in its own docked strip below the app bar, only when Advanced is on,
+// so the app bar never reads as a keyboard-macro palette.
 const MOMENTS = [
   { n: 1, label: "Write" },
   { n: 2, label: "Derive" },
@@ -16,6 +20,67 @@ export function TopBar() {
   const setMode = useConsole((s) => s.setMode);
   const advanced = useConsole((s) => s.advanced);
   const toggleAdvanced = useConsole((s) => s.toggleAdvanced);
+
+  // Theme is local, not zustand: it must survive story resets.
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "";
+  }, [dark]);
+
+  return (
+    <>
+      <header className="flex h-16 shrink-0 items-center justify-between px-4">
+        <div className="flex items-center gap-3">
+          <div className="grid h-8 w-8 place-items-center rounded-md3-sm bg-primary text-on-primary">
+            <span className="text-label-lg font-medium">R</span>
+          </div>
+          <div className="text-title-lg text-on-surface">Recant</div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Story / Explore switch: M3 segmented button */}
+          <div
+            role="tablist"
+            aria-label="View mode"
+            className="flex h-10 divide-x divide-outline overflow-hidden rounded-full border border-outline"
+          >
+            {(["story", "explore"] as const).map((m) => (
+              <button
+                key={m}
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => setMode(m)}
+                className={`state-layer flex h-full items-center gap-2 px-5 text-label-lg font-medium ${
+                  mode === m
+                    ? "bg-secondary-container text-on-secondary-container"
+                    : "text-on-surface"
+                }`}
+              >
+                {mode === m && <Icon name="check" size={16} />}
+                {m === "story" ? "Story" : "Explore"}
+              </button>
+            ))}
+          </div>
+
+          <IconButton
+            icon={dark ? "light_mode" : "dark_mode"}
+            label="Toggle theme"
+            onClick={() => setDark((d) => !d)}
+          />
+
+          <PillToggle label="Advanced" on={advanced} onClick={toggleAdvanced} offIcon="tune" />
+        </div>
+      </header>
+
+      {advanced && <DemoStrip />}
+    </>
+  );
+}
+
+// The Demo Director, docked under the app bar: proof moments 1-6, reset, and
+// the Judge/Recording toggles. Submission machinery, deliberately separate
+// from the product chrome.
+function DemoStrip() {
   const overlayOn = useConsole((s) => s.overlayOn);
   const recordingMode = useConsole((s) => s.recordingMode);
   const toggleOverlay = useConsole((s) => s.toggleOverlay);
@@ -24,100 +89,81 @@ export function TopBar() {
   const reset = useConsole((s) => s.reset);
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-hairline bg-[var(--ink-2)] px-4">
-      <div className="flex items-center gap-3">
-        <div
-          className="flex h-6 w-6 items-center justify-center rounded-tag border"
-          style={{ borderColor: "var(--uv)", boxShadow: "0 0 12px -3px var(--uv-glow)" }}
+    <div className="flex h-11 shrink-0 items-center gap-2 px-4">
+      <span className="text-label-md font-medium text-on-surface-variant">Demo</span>
+      <div className="flex items-center gap-1.5">
+        {MOMENTS.map((m) => (
+          <button
+            key={m.n}
+            onClick={() => runMoment(m.n)}
+            className="state-layer flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md3-sm border border-outline-variant px-2.5 text-label-md font-medium text-on-surface-variant"
+          >
+            <span className="mono text-on-surface-variant">{m.n}</span>
+            {m.label}
+          </button>
+        ))}
+        <button
+          onClick={reset}
+          aria-label="Reset the demo"
+          title="Reset the demo (R)"
+          className="state-layer flex h-8 w-8 items-center justify-center rounded-md3-sm border border-outline-variant text-on-surface-variant"
         >
-          <span className="font-display text-[13px] leading-none" style={{ color: "var(--uv)" }}>
-            R
-          </span>
-        </div>
-        <div className="leading-none">
-          <div className="font-display text-[15px] tracking-[0.02em] text-bond">Recant</div>
-          <div className="font-ui text-[10px] text-bond-dim">Take back bad AI memories</div>
-        </div>
+          <Icon name="restart_alt" size={16} />
+        </button>
       </div>
-
-      <div className="flex items-center gap-3">
-        {/* judge-facing demo machinery, only when Advanced is on */}
-        {advanced && (
-          <>
-            <div className="hidden items-center gap-1 lg:flex">
-              {MOMENTS.map((m) => (
-                <button
-                  key={m.n}
-                  onClick={() => runMoment(m.n)}
-                  className="group flex items-center gap-1 rounded-tag border border-hairline px-2 py-1 font-ui text-[11px] text-bond-dim transition-colors hover:border-uv hover:text-bond"
-                >
-                  <span className="mono text-[9px] text-bond-dim group-hover:text-uv">{m.n}</span>
-                  {m.label}
-                </button>
-              ))}
-              <button
-                onClick={reset}
-                className="rounded-tag border border-hairline px-2 py-1 font-ui text-[11px] text-bond-dim transition-colors hover:text-bond"
-              >
-                <span className="mono text-[9px]">R</span> reset
-              </button>
-            </div>
-            <Toggle label="Judge J" on={overlayOn} onClick={toggleOverlay} />
-            <Toggle label="Rec V" on={recordingMode} onClick={toggleRecording} tone="rec" />
-            <span className="h-4 w-px bg-hairline" />
-          </>
-        )}
-
-        {/* Story / Explore switch */}
-        <div className="flex items-center rounded-panel border border-hairline p-0.5" role="tablist" aria-label="View mode">
-          {(["story", "explore"] as const).map((m) => (
-            <button
-              key={m}
-              role="tab"
-              aria-selected={mode === m}
-              onClick={() => setMode(m)}
-              className="rounded-tag px-3 py-1 font-ui text-[12.5px] font-medium capitalize transition-colors"
-              style={{
-                background: mode === m ? "var(--uv)" : "transparent",
-                color: mode === m ? "#0e0b1f" : "var(--bond-dim)",
-              }}
-            >
-              {m === "story" ? "Story" : "Explore"}
-            </button>
-          ))}
-        </div>
-
-        <Toggle label="Advanced" on={advanced} onClick={toggleAdvanced} />
-      </div>
-    </header>
+      <span aria-hidden className="mx-1 h-5 w-px bg-outline-variant" />
+      <PillToggle label="Judge overlay" hint="J" on={overlayOn} onClick={toggleOverlay} small />
+      <PillToggle
+        label="Recording"
+        hint="V"
+        on={recordingMode}
+        onClick={toggleRecording}
+        tone="recording"
+        small
+      />
+    </div>
   );
 }
 
-function Toggle({
+// M3 pill toggle: outlined at rest, tonal when on. Recording tone flips the on
+// state to the error container so a live capture is unmistakable.
+function PillToggle({
   label,
   on,
   onClick,
-  tone = "uv",
+  hint,
+  offIcon,
+  tone = "default",
+  small = false,
 }: {
   label: string;
   on: boolean;
   onClick: () => void;
-  tone?: "uv" | "rec";
+  hint?: string;
+  offIcon?: string;
+  tone?: "default" | "recording";
+  small?: boolean;
 }) {
-  const color = tone === "rec" ? "var(--quarantined)" : "var(--uv)";
+  const onClasses =
+    tone === "recording"
+      ? "bg-error-container text-on-error-container"
+      : "bg-secondary-container text-on-secondary-container";
+  const onIcon = tone === "recording" ? "radio_button_checked" : "check";
   return (
     <button
       onClick={onClick}
       aria-pressed={on}
-      className="flex items-center gap-1.5 rounded-tag px-2 py-1 font-ui text-[11px] transition-colors"
-      style={{
-        color: on ? color : "var(--bond-dim)",
-        border: `1px solid ${on ? `color-mix(in srgb, ${color} 45%, transparent)` : "var(--hairline)"}`,
-        background: on ? `color-mix(in srgb, ${color} 10%, transparent)` : "transparent",
-      }}
+      className={`state-layer flex items-center gap-2 whitespace-nowrap rounded-full border border-outline font-medium ${
+        small ? "h-8 px-3 text-label-md" : "h-10 px-4 text-label-lg"
+      } ${on ? onClasses : "text-on-surface-variant"}`}
     >
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: on ? color : "var(--hairline-strong)" }} />
+      {on ? (
+        <Icon name={onIcon} size={16} />
+      ) : offIcon ? (
+        <Icon name={offIcon} size={16} />
+      ) : null}
       {label}
+      {hint && <span className="mono text-label-sm">{hint}</span>}
     </button>
   );
 }

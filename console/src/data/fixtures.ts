@@ -97,7 +97,7 @@ export const CLUSTER: ClusterNode[] = [
 export const TICKER_SEED: ChangefeedEvent[] = [
   { id: 1, at: "14:35:31", text: "Ops bot saved memory #3 · signature checked", tone: "neutral" },
   { id: 2, at: "14:34:12", text: "Ops bot saved memory #1 · from Partner status feed", tone: "neutral" },
-  { id: 3, at: "14:33:58", text: "Support bot memory #3 flagged — 91% meaning-match to forum post", tone: "neutral" },
+  { id: 3, at: "14:33:58", text: "Support bot memory #3 flagged: 91% meaning-match to forum post", tone: "neutral" },
 ];
 
 // The taint closure of a source: its direct beliefs, then every belief reachable

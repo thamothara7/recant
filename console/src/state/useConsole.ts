@@ -44,7 +44,7 @@ function recantEvents(sourceId: string): ChangefeedEvent[] {
   const closure = taintClosure(sourceId);
   const bots = new Set(BELIEFS.filter((b) => closure.includes(b.id)).map((b) => b.agentId));
   return [
-    { id: evtId++, at: nowClock(), text: `Took back ${closure.length} memories from ${bots.size} bots — all at once`, tone: "quarantine" },
+    { id: evtId++, at: nowClock(), text: `Took back ${closure.length} memories from ${bots.size} bots, all at once`, tone: "quarantine" },
     { id: evtId++, at: nowClock(), text: "Ops bot's refund #4471 stopped just in time", tone: "evict" },
   ];
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { copy, short } from "../lib/format";
+import { Icon } from "./m3";
 
 // Mono hash truncated to 8 chars with a copy affordance (skill 2).
 export function HashChip({
@@ -13,25 +14,25 @@ export function HashChip({
 }) {
   const [done, setDone] = useState(false);
   return (
-    <button
-      type="button"
-      onClick={async (e) => {
-        e.stopPropagation();
-        await copy(hash);
-        setDone(true);
-        window.setTimeout(() => setDone(false), 900);
-      }}
-      title={`Copy ${hash}`}
-      className={`group inline-flex items-center gap-1 mono text-[11px] text-bond-dim hover:text-bond transition-colors ${className}`}
+    <span
+      className={`inline-flex h-6 items-center gap-1 rounded-md3-sm bg-surface-container-high px-2 text-on-surface-variant ${className}`}
     >
-      {label && <span className="text-bond-dim/70">{label}</span>}
-      <span className="text-bond/85">{short(hash)}</span>
-      <span
-        aria-hidden
-        className="text-[9px] text-bond-dim/60 group-hover:text-uv transition-colors"
+      {label && <span className="text-label-md">{label}</span>}
+      <span className="mono text-label-md">{short(hash)}</span>
+      <button
+        type="button"
+        aria-label="Copy hash"
+        title={`Copy ${hash}`}
+        onClick={async (e) => {
+          e.stopPropagation();
+          await copy(hash);
+          setDone(true);
+          window.setTimeout(() => setDone(false), 900);
+        }}
+        className="state-layer -mr-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
       >
-        {done ? "copied" : "copy"}
-      </span>
-    </button>
+        <Icon name={done ? "check" : "content_copy"} size={14} />
+      </button>
+    </span>
   );
 }
