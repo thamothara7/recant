@@ -32,7 +32,13 @@ def clean_tables():
     from services.common.db import get_pool
 
     with get_pool().connection() as conn:
+        # FK order: fanout_deliveries references memory_events; agent_actions
+        # references agents and incidents. agent_memory and message_store are
+        # runtime tables bootstrapped outside the migration chain, so they may
+        # not exist yet.
         for table in (
+            "fanout_deliveries",
+            "agent_actions",
             "derivations",
             "beliefs",
             "quarantine_actions",
@@ -42,4 +48,7 @@ def clean_tables():
             "memory_events",
         ):
             conn.execute(f"DELETE FROM {table}")
+        for table in ("agent_memory", "message_store"):
+            if conn.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0]:
+                conn.execute(f"DELETE FROM {table}")
     yield
