@@ -153,7 +153,17 @@ uv run pytest
 Unit tests always run; integration tests run only when `DATABASE_URL` is set
 (otherwise they skip). The integration suite deletes every row before each
 test, so running it wipes seed data; reseed afterward (step 5) if you want data
-to inspect.
+to inspect. **Stop the services (step 5) before running the integration suite**
+so it has the cluster to itself.
+
+If the suite starts failing with serialization errors or `unknown agent` 404s,
+the local cluster is throttled: an unlicensed multi-node CockroachDB cluster
+caps at 5 concurrent transactions after a 7-day grace period. Reset it (this
+destroys local data and starts a fresh grace period), then reseed:
+
+```bash
+bash ops/chaos/reset.sh
+```
 
 ### 5. Start the services and seed the demo
 
