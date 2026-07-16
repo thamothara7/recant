@@ -24,6 +24,26 @@ def client():
         yield c
 
 
+@pytest.fixture(scope="session")
+def forensics_client():
+    from fastapi.testclient import TestClient
+
+    from services.forensics.app import app
+
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture(scope="session")
+def quarantine_client():
+    from fastapi.testclient import TestClient
+
+    from services.quarantine.app import app
+
+    with TestClient(app) as c:
+        yield c
+
+
 @pytest.fixture(autouse=True)
 def clean_tables():
     if not os.environ.get("DATABASE_URL"):
