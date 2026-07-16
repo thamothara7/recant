@@ -114,6 +114,9 @@ interface ConsoleState {
   // The live board's statuses at first load (pre any recant): the "past" the
   // AOST scrubber rewinds to. Null until the first successful live fetch.
   liveSeedStatuses: Record<string, BeliefStatus> | null;
+  // The source recanted in live mode, preserved across Story round-trips (which
+  // overwrite recantedSource with fixture ids).
+  liveRecantedSource: string | null;
 
   statuses: Record<string, BeliefStatus>;
   selectedBelief: string | null;
@@ -161,6 +164,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   boardLoaded: !CONFIG.live, // fixtures are ready synchronously
   boardError: null,
   liveSeedStatuses: null,
+  liveRecantedSource: null,
 
   statuses: initialStatuses(),
   selectedBelief: null,
@@ -183,12 +187,15 @@ export const useConsole = create<ConsoleState>((set, get) => ({
       get().setStoryStep(get().storyStep);
     } else {
       // Return the clock to "now". In live mode, Explore shows the live board's
-      // own statuses (Story mode may have clobbered them with fixture snapshots).
+      // own statuses and its own recanted source (a Story round-trip clobbers
+      // both with fixture snapshots; restore them so a recanted source stays
+      // marked and cannot be recanted a second time).
       const s = get();
       set({
         mode,
         aostHours: 0,
         statuses: s.live ? statusesOf(s.board.beliefs) : s.statuses,
+        recantedSource: s.live ? s.liveRecantedSource : s.recantedSource,
         selectedBelief: null,
         selectedSource: null,
       });
@@ -282,11 +289,52 @@ export const useConsole = create<ConsoleState>((set, get) => ({
             ].slice(0, 40),
             recanting: false,
             recantedSource: sourceId,
+            liveRecantedSource: sourceId,
           }));
         } catch (e) {
           set({ recanting: false, boardError: e instanceof Error ? e.message : String(e) });
         }
       })();
+      return;
+    }
+
+    // Half-live (forensics reads live, no quarantine URL): the board is keyed by
+    // live ids, so close over the live board, not the fixture graph, and flip
+    // those ids. Without this the fixture closure is empty for live UUIDs and
+    // the recant would silently flip nothing while marking the source done.
+    if (get().live) {
+      const board = get().board;
+      const closure = closureOverBoard(board, sourceId);
+      const bots = new Set(
+        board.beliefs.filter((b) => closure.includes(b.id)).map((b) => b.agentId),
+      );
+      set({ recanting: true, incidentOpen: true });
+      get().flash(
+        "SERIALIZABLE TXN",
+        `${closure.length} rows`,
+        `UPDATE beliefs SET status='quarantined' WHERE belief_id = ANY($1) -- ${closure.length} rows`,
+      );
+      window.setTimeout(() => {
+        set((s) => {
+          const statuses = { ...s.statuses };
+          for (const id of closure) statuses[id] = "quarantined";
+          return {
+            statuses,
+            ticker: [
+              {
+                id: evtId++,
+                at: nowClock(),
+                text: `Took back ${closure.length} memories from ${bots.size} bots, all at once`,
+                tone: "quarantine" as const,
+              },
+              ...s.ticker,
+            ].slice(0, 40),
+            recanting: false,
+            recantedSource: sourceId,
+            liveRecantedSource: sourceId,
+          };
+        });
+      }, 1150);
       return;
     }
 

@@ -13,11 +13,31 @@ export interface Board {
   derivations: Derivation[];
 }
 
+const FETCH_TIMEOUT_MS = 8000;
+
 async function getJson<T>(url: string): Promise<T> {
-  const r = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!r.ok) throw new Error(`GET ${url} -> ${r.status}`);
-  return r.json() as Promise<T>;
+  // A reachable-but-unresponsive host must not pin the loading spinner forever;
+  // time out and let the caller fall back to fixtures with a banner.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const r = await fetch(url, { headers: { Accept: "application/json" }, signal: ctrl.signal });
+    if (!r.ok) throw new Error(`GET ${url} -> ${r.status}`);
+    return (await r.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
 }
+
+// The backend enum may gain values the UI does not know; clamp to the nearest
+// safe display value rather than letting an undefined STATUS_META/TRUST_META
+// lookup throw during render and blank the board.
+const KNOWN_STATUS: BeliefStatus[] = ["active", "suspect", "quarantined", "retracted"];
+const KNOWN_TRUST: TrustTier[] = ["verified", "partner", "public", "untrusted"];
+const safeStatus = (s: string): BeliefStatus =>
+  (KNOWN_STATUS as string[]).includes(s) ? (s as BeliefStatus) : "suspect";
+const safeTrust = (t: string): TrustTier =>
+  (KNOWN_TRUST as string[]).includes(t) ? (t as TrustTier) : "untrusted";
 
 // The DB has no display "role" for an agent or "label" for a source; derive a
 // readable fallback so the live board reads as well as the fixtures.
@@ -63,7 +83,7 @@ function mapBelief(b: ApiBelief, region: string): Belief {
     agentId: b.agent_id as Belief["agentId"],
     seq: b.seq,
     content: b.content,
-    status: b.status as BeliefStatus,
+    status: safeStatus(b.status),
     sourceId: b.source_id,
     hash: b.hash,
     prevHash: b.prev_hash,
@@ -89,7 +109,7 @@ export async function fetchBoard(): Promise<Board> {
       kind: KIND_TO_UI[s.kind] ?? "web",
       label: hostOf(s.uri),
       uri: s.uri,
-      trust: s.trust_tier as TrustTier,
+      trust: safeTrust(s.trust_tier),
     })),
     beliefs: raw.beliefs.map((b) => mapBelief(b, agentRegion.get(b.agent_id) ?? "local")),
     derivations: raw.derivations.map((d) => ({
