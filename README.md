@@ -83,33 +83,82 @@ Recant is a set of independently runnable components, one per directory:
 | fleet | `fleet/` | Three demo agents (researcher, support, ops) on langchain-cockroachdb working memory | Built |
 | console | `console/` | Judge-facing UI built under the `recant-frontend` skill; deployed to Vercel | Built |
 
-## Quickstart
+## Setup (macOS, Windows, Linux)
+
+New to this stack? You need three tools: Docker, uv, and (only for the web
+console) Node. You do NOT install Python yourself: **uv downloads and manages a
+Python 3.12 for this project automatically**, so on every OS you just run
+`uv run python ...` and never pick an interpreter. (On macOS the system command
+would be `python3`, but you will not need it.)
+
+### 1. Install the tools
+
+macOS (using [Homebrew](https://brew.sh)):
+
+```bash
+brew install --cask docker    # Docker Desktop (or download it from docker.com)
+brew install uv node          # uv manages Python; node is only for the console
+```
+
+Windows (PowerShell):
+
+```powershell
+winget install Docker.DockerDesktop
+winget install astral-sh.uv
+winget install OpenJS.NodeJS
+```
+
+**Windows, important:** the setup scripts (`ops/chaos/init.sh`,
+`ops/run-services.sh`) are bash. Run every command below inside **WSL2**
+(recommended) or **Git Bash**, not PowerShell or cmd, so the scripts and
+`export` lines work exactly as written.
+
+Linux (Debian/Ubuntu):
+
+```bash
+# Docker Engine: follow https://docs.docker.com/engine/install
+curl -LsSf https://astral.sh/uv/install.sh | sh
+sudo apt install -y nodejs npm git
+```
+
+Start Docker Desktop (macOS/Windows) and wait until it reports "running", or
+start the Docker service (Linux), before continuing.
+
+### 2. Get the code
 
 ```bash
 git clone https://github.com/thamothara7/recant.git
 cd recant
-uv sync
+uv sync    # provisions Python 3.12 and every dependency; no manual Python needed
+```
 
-ops/chaos/init.sh
+### 3. Start the database and apply the schema
+
+```bash
+bash ops/chaos/init.sh
 export DATABASE_URL=postgresql://root@localhost:26257/recant?sslmode=disable
-
 uv run python -m db.migrate
 ```
 
-Run the tests next, before seeding:
+On Windows PowerShell (if you are not using WSL2 or Git Bash), set the variable
+with `$env:DATABASE_URL="postgresql://root@localhost:26257/recant?sslmode=disable"`
+instead of `export`.
+
+### 4. Run the tests
 
 ```bash
 uv run pytest
 ```
 
-Tests under `tests/integration/` skip automatically unless `DATABASE_URL` is
-set; unit tests under `tests/unit/` always run. The integration suite deletes
-every row from every table before each test, so running it against a seeded
-database wipes the seed data; reseed afterward (below) if you want data to
-inspect.
+Unit tests always run; integration tests run only when `DATABASE_URL` is set
+(otherwise they skip). The integration suite deletes every row before each
+test, so running it wipes seed data; reseed afterward (step 5) if you want data
+to inspect.
 
-Now start the three services. The launcher runs all three in one terminal and
-stops them together on Ctrl+C:
+### 5. Start the services and seed the demo
+
+The launcher starts all three services in one terminal and stops them together
+on Ctrl+C (it loads `.env` itself, so `DATABASE_URL` is already handled):
 
 ```bash
 bash ops/run-services.sh
@@ -120,7 +169,8 @@ Gateway on :8000 (writes), quarantine on :8001 (recant), forensics on :8002
 `uv run uvicorn services.attest_gateway.app:app --port 8000`, then the
 `services.quarantine.app` and `services.forensics.app` apps on 8001 and 8002.
 
-Seed the contamination story through the gateway:
+The launcher keeps running, so open a **second terminal** (in the same `recant`
+folder) and seed the contamination story through the gateway:
 
 ```bash
 uv run python ops/seed/seed.py
