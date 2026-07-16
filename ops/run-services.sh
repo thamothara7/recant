@@ -1,15 +1,26 @@
 #!/usr/bin/env bash
 # Start the three Recant services together in one terminal. Ctrl+C stops all
 # three. Each is an independent FastAPI app; this is just a convenience launcher
-# so you do not need three terminals.
+# so you do not need three terminals or to remember DATABASE_URL.
 #
-#   export DATABASE_URL=postgresql://root@localhost:26257/recant?sslmode=disable
 #   bash ops/run-services.sh
 #
 # gateway :8000 (writes)  quarantine :8001 (recant)  forensics :8002 (reads)
 set -euo pipefail
 
-: "${DATABASE_URL:?export DATABASE_URL first (see the README quickstart)}"
+# Run from the repo root (the uvicorn module paths and pythonpath="." need it)
+# and load .env so DATABASE_URL and friends do not have to be re-exported in
+# every new shell. An already-exported DATABASE_URL still wins.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+fi
+
+: "${DATABASE_URL:?not set and no .env found; export DATABASE_URL first (see the README quickstart)}"
 # Let the console read the judge-overlay header cross-origin in dev.
 export RECANT_CORS_ORIGINS="${RECANT_CORS_ORIGINS:-http://localhost:5173}"
 
