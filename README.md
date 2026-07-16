@@ -108,14 +108,17 @@ every row from every table before each test, so running it against a seeded
 database wipes the seed data; reseed afterward (below) if you want data to
 inspect.
 
-Now start the three services (each in its own terminal, all with `DATABASE_URL`
-exported the same way):
+Now start the three services. The launcher runs all three in one terminal and
+stops them together on Ctrl+C:
 
 ```bash
-uv run uvicorn services.attest_gateway.app:app --port 8000  # writes
-uv run uvicorn services.quarantine.app:app     --port 8001  # recant
-uv run uvicorn services.forensics.app:app      --port 8002  # reads
+bash ops/run-services.sh
 ```
+
+Gateway on :8000 (writes), quarantine on :8001 (recant), forensics on :8002
+(reads). To run them by hand instead, start each in its own terminal:
+`uv run uvicorn services.attest_gateway.app:app --port 8000`, then the
+`services.quarantine.app` and `services.forensics.app` apps on 8001 and 8002.
 
 Seed the contamination story through the gateway:
 
