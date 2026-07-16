@@ -1,6 +1,6 @@
-// The product mark: a memory dot with a custody thread arcing back around it,
-// the recant gesture (take the fact back) drawn as one stroke. Flat, geometric,
-// M3-disciplined: primary tile, on-primary glyph, no gradients or effects.
+// The product mark: an R monogram whose leg is the custody thread, ending in
+// a memory bead it has caught. One letterform, one idea (the thread holds the
+// memory), no effects. M3-disciplined: primary tile, on-primary glyph.
 // The favicon (public/favicon.svg) mirrors this geometry; keep them in sync.
 export function LogoMark({ size = 32 }: { size?: number }) {
   return (
@@ -15,16 +15,23 @@ export function LogoMark({ size = 32 }: { size?: number }) {
         viewBox="0 0 24 24"
         fill="none"
       >
-        {/* the belief: one memory */}
-        <circle cx="12" cy="12" r="2.5" fill="currentColor" />
-        {/* the thread pulling it back: 270deg arc, arrow rising into the gap */}
+        {/* stem and bowl of the R */}
         <path
-          d="M 12 5 A 7 7 0 1 0 19 12"
+          d="M 8.2 19.2 V 5.2 H 12.9 A 4.1 4.1 0 0 1 12.9 13.4 H 8.2"
           stroke="currentColor"
-          strokeWidth="2.4"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {/* the leg is the custody thread... */}
+        <path
+          d="M 11.9 13.4 L 15.1 17.4"
+          stroke="currentColor"
+          strokeWidth="2.5"
           strokeLinecap="round"
         />
-        <path d="M 16.4 12.6 L 21.6 12.6 L 19 8.4 Z" fill="currentColor" />
+        {/* ...ending in the memory bead it caught */}
+        <circle cx="16.6" cy="19.2" r="1.9" fill="currentColor" />
       </svg>
     </div>
   );

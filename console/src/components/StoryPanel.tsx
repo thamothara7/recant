@@ -1,4 +1,5 @@
 import { POISONED_SOURCE, STORY } from "../data/story";
+import { markStoryDone } from "../lib/storyProgress";
 import { useConsole } from "../state/useConsole";
 import { Button } from "./m3";
 
@@ -72,7 +73,15 @@ export function StoryPanel() {
             Back
           </Button>
           {last ? (
-            <Button variant="filled" onClick={() => setMode("explore")}>
+            <Button
+              variant="filled"
+              onClick={() => {
+                // Finishing the walkthrough is remembered per browser: the
+                // next visit opens in Explore (App.tsx reads the flag).
+                markStoryDone();
+                setMode("explore");
+              }}
+            >
               Start exploring
             </Button>
           ) : (

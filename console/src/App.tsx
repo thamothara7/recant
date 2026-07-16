@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "./components/AppShell";
 import { MobileSummary } from "./components/MobileSummary";
+import { isStoryDone } from "./lib/storyProgress";
 import { useConsole } from "./state/useConsole";
 
 // The board needs room (skill 4: desktop-first). Below the laptop breakpoint
@@ -43,9 +44,13 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Apply the first story step's snapshot on load.
+  // First visit: start the walkthrough at step 1. A browser that already
+  // finished it (localStorage flag) opens straight into Explore; the Story
+  // tab replays the walkthrough on demand.
   useEffect(() => {
-    useConsole.getState().setStoryStep(0);
+    const s = useConsole.getState();
+    if (isStoryDone()) s.setMode("explore");
+    else s.setStoryStep(0);
   }, []);
 
   const wide = useWide();
