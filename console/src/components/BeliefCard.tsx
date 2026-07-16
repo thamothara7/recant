@@ -1,11 +1,8 @@
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { NODE_W, type BeliefNodeData } from "../lib/graph";
-import { AGENTS, SOURCES } from "../data/fixtures";
 import { STATUS_META, clockUtc, short } from "../lib/format";
-import { useConsole, useDisplayStatuses } from "../state/useConsole";
+import { useActiveBoard, useConsole, useDisplayStatuses } from "../state/useConsole";
 import { Chip } from "./m3";
-
-const agentName = (id: string) => AGENTS.find((a) => a.id === id)?.name ?? id;
 
 // One memory, rendered as an M3 outlined card a first-time viewer can read
 // cold: who saved it, what it says, whether it's healthy, in plain words.
@@ -13,6 +10,8 @@ const agentName = (id: string) => AGENTS.find((a) => a.id === id)?.name ?? id;
 // react-flow node so arrows attach.
 export function BeliefCard({ id, data }: NodeProps<Node<BeliefNodeData>>) {
   const { belief } = data;
+  const board = useActiveBoard();
+  const agentName = (aid: string) => board.agents.find((a) => a.id === aid)?.name ?? aid;
   const status = useDisplayStatuses()[id] ?? belief.status;
   const selected = useConsole((s) => s.selectedBelief === id);
   const hovered = useConsole((s) => s.hoverBelief === id);
@@ -20,7 +19,7 @@ export function BeliefCard({ id, data }: NodeProps<Node<BeliefNodeData>>) {
   const select = useConsole((s) => s.selectBelief);
   const hover = useConsole((s) => s.hover);
   const meta = STATUS_META[status];
-  const src = belief.sourceId ? SOURCES.find((s) => s.id === belief.sourceId) : null;
+  const src = belief.sourceId ? board.sources.find((s) => s.id === belief.sourceId) : null;
 
   return (
     <div

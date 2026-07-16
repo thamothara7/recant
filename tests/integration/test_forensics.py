@@ -263,6 +263,45 @@ class TestAffidavit:
 
 
 @requires_db
+class TestBoard:
+    def test_board_returns_full_graph(self, client, forensics_client):
+        agent = client.post(
+            "/agents", json={"name": f"board-{time.time_ns()}"}
+        ).json()
+        source = client.post(
+            "/sources",
+            json={"kind": "web_scrape", "uri": "https://example.com/b", "trust_tier": "untrusted"},
+        ).json()
+        b1 = _seed_belief(client, agent["agent_id"], "board root belief")
+        _seed_belief(
+            client, agent["agent_id"], "board child belief",
+            source_id=source["source_id"], parent_ids=[b1["belief_id"]],
+        )
+
+        r = forensics_client.get("/board")
+        assert r.status_code == 200
+        data = r.json()
+        # This agent, its source, both beliefs, and the explicit edge are present.
+        assert any(a["agent_id"] == agent["agent_id"] for a in data["agents"])
+        agent_row = next(a for a in data["agents"] if a["agent_id"] == agent["agent_id"])
+        assert len(agent_row["pubkey8"]) == 8
+        assert any(s["source_id"] == source["source_id"] for s in data["sources"])
+        our = [b for b in data["beliefs"] if b["agent_id"] == agent["agent_id"]]
+        assert len(our) == 2
+        assert any(
+            d["parent_id"] == b1["belief_id"] and d["kind"] == "explicit"
+            for d in data["derivations"]
+        )
+        assert "SERIALIZABLE TXN" in r.headers.get("X-Recant-Primitive", "")
+
+    def test_board_empty_is_ok(self, forensics_client):
+        r = forensics_client.get("/board")
+        assert r.status_code == 200
+        for key in ("agents", "sources", "beliefs", "derivations"):
+            assert isinstance(r.json()[key], list)
+
+
+@requires_db
 class TestArchive:
     def test_archive_bundles_incident_evidence(
         self, client, forensics_client, quarantine_client, monkeypatch

@@ -32,6 +32,10 @@ export function AppShell() {
   const pastMode = aostHours < 0;
   const recording = useConsole((s) => s.recordingMode);
   const hasSelection = useConsole((s) => !!(s.selectedBelief || s.selectedSource));
+  const boardError = useConsole((s) => s.boardError);
+  // In live mode, hold the board until the first fetch resolves so the fixture
+  // seed never flashes with ids that vanish a beat later.
+  const loading = useConsole((s) => s.live && !s.boardLoaded);
 
   const story = mode === "story";
   // The rewind slider appears once the story introduces it, and always in Explore.
@@ -40,16 +44,31 @@ export function AppShell() {
   return (
     <div className={`relative flex h-full min-w-[1180px] flex-col ${recording && advanced ? "recording" : ""}`}>
       <TopBar />
+      {boardError && (
+        <div className="mx-3 mb-2 flex items-center gap-2 rounded-md3-md bg-error-container px-4 py-2 text-on-error-container">
+          <Icon name="cloud_off" size={18} />
+          <span className="text-body-sm">
+            Live data unavailable, showing the built-in demo. ({boardError})
+          </span>
+        </div>
+      )}
       {showScrubber && <AostScrubber />}
 
       <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
-        {!story && (
+        {!story && !loading && (
           <div className="min-h-0 w-[280px] shrink-0 overflow-y-auto">
             <LeftRail />
           </div>
         )}
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md3-lg bg-surface">
-          <ProvenanceBoard />
+          {loading ? (
+            <div className="flex h-full items-center justify-center gap-2 text-on-surface-variant">
+              <Icon name="progress_activity" size={20} className="animate-spin" />
+              <span className="text-body-md">Loading the live memory board</span>
+            </div>
+          ) : (
+            <ProvenanceBoard />
+          )}
           {/* Judge chips dock bottom-leading inside the board card so they can
               never occlude the rail or the inspector */}
           {advanced && <JudgeOverlay />}

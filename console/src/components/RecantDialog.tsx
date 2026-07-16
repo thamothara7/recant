@@ -1,23 +1,41 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AGENTS, BELIEFS, SOURCES, taintClosure } from "../data/fixtures";
-import { useConsole } from "../state/useConsole";
+import { fetchPreview } from "../lib/api";
+import { CONFIG } from "../lib/config";
+import { closureOverBoard, useActiveBoard, useConsole } from "../state/useConsole";
 import { Icon } from "./m3";
-
-const agentName = (id: string) => AGENTS.find((a) => a.id === id)?.name ?? id;
 
 // The one big action in the console, in plain words: say exactly what will be
 // blocked, show the list, ask for one clear confirmation. (The old typed-id
 // confirmation was beginner-hostile; the blast radius is still named exactly.)
 export function RecantDialog({ sourceId }: { sourceId: string }) {
   const [open, setOpen] = useState(false);
+  const [liveClosure, setLiveClosure] = useState<string[] | null>(null);
+  const board = useActiveBoard();
   const recant = useConsole((s) => s.recant);
   const already = useConsole((s) => s.recantedSource === sourceId);
 
-  const src = SOURCES.find((s) => s.id === sourceId)!;
-  const closure = taintClosure(sourceId);
-  const affected = BELIEFS.filter((b) => closure.includes(b.id));
+  // In live mode the client can only see explicit edges before the recant, so
+  // ask the taint engine for the real closure (incl. vector-inferred copies)
+  // when the dialog opens. Falls back to the client closure on any error.
+  useEffect(() => {
+    if (!open || !CONFIG.liveRecant) return;
+    let cancelled = false;
+    fetchPreview(sourceId)
+      .then((p) => !cancelled && setLiveClosure(p.closureIds))
+      .catch(() => !cancelled && setLiveClosure(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, sourceId]);
+
+  const agentName = (id: string) => board.agents.find((a) => a.id === id)?.name ?? id;
+  const src = board.sources.find((s) => s.id === sourceId);
+  const clientClosure = closureOverBoard(board, sourceId);
+  const closure = liveClosure ?? clientClosure;
+  const affected = board.beliefs.filter((b) => closure.includes(b.id));
   const bots = new Set(affected.map((b) => b.agentId));
+  if (!src) return null;
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>

@@ -1,34 +1,37 @@
 import type { ReactNode } from "react";
-import {
-  AGENTS,
-  BELIEFS,
-  DERIVATIONS,
-  INCIDENT,
-  SOURCES,
-  taintClosure,
-} from "../data/fixtures";
-import type { Belief } from "../data/types";
+import { INCIDENT } from "../data/fixtures";
+import type { Belief, Source } from "../data/types";
+import type { Board } from "../lib/api";
 import { HashChip } from "./HashChip";
 import { StatusBadge } from "./StatusBadge";
 import { RecantDialog } from "./RecantDialog";
 import { STATUS_EXPLAIN, TRUST_META, clockUtc } from "../lib/format";
-import { useConsole, useDisplayStatuses } from "../state/useConsole";
+import {
+  closureOverBoard,
+  useActiveBoard,
+  useConsole,
+  useDisplayStatuses,
+} from "../state/useConsole";
 import { Chip, Icon } from "./m3";
 
-const agentName = (id: string) => AGENTS.find((a) => a.id === id)?.name ?? id;
-const beliefById = (id: string) => BELIEFS.find((b) => b.id === id);
-const incidentClosure = taintClosure(INCIDENT.sourceId);
+// The demo's incident is the one untrusted source; live boards may have one or
+// none. Its taint closure over the active board decides which beliefs show the
+// incident panel (fixtures carry inferred edges; a live board gains them once
+// the recant materializes them).
+const incidentSourceOf = (board: Board): Source | undefined =>
+  board.sources.find((s) => s.trust === "untrusted");
 
 // Plain-English details panel (beginner-first redesign). Answers, in order:
 // what does this memory say, is it OK, where did it come from, where did it
 // spread. Hashes/signatures/regions only appear with the Advanced toggle.
 // The panel surface (rounded card, bg-surface, scroll) comes from AppShell.
 export function Inspector() {
+  const board = useActiveBoard();
   const selectedBelief = useConsole((s) => s.selectedBelief);
   const selectedSource = useConsole((s) => s.selectedSource);
   const statuses = useDisplayStatuses();
 
-  const belief = selectedBelief ? beliefById(selectedBelief) : null;
+  const belief = selectedBelief ? board.beliefs.find((b) => b.id === selectedBelief) : null;
 
   return (
     <aside className="flex h-full flex-col">
@@ -40,9 +43,9 @@ export function Inspector() {
 
       <div className="flex-1">
         {belief ? (
-          <BeliefInspector belief={belief} status={statuses[belief.id] ?? belief.status} />
+          <BeliefInspector board={board} belief={belief} status={statuses[belief.id] ?? belief.status} />
         ) : selectedSource ? (
-          <SourceInspector sourceId={selectedSource} />
+          <SourceInspector board={board} sourceId={selectedSource} />
         ) : (
           <Empty />
         )}
@@ -94,12 +97,25 @@ function ChainRow({
   );
 }
 
-function BeliefInspector({ belief, status }: { belief: Belief; status: Belief["status"] }) {
+function BeliefInspector({
+  board,
+  belief,
+  status,
+}: {
+  board: Board;
+  belief: Belief;
+  status: Belief["status"];
+}) {
   const advanced = useConsole((s) => s.advanced);
-  const src = belief.sourceId ? SOURCES.find((s) => s.id === belief.sourceId) : null;
-  const parents = DERIVATIONS.filter((d) => d.childId === belief.id);
-  const children = DERIVATIONS.filter((d) => d.parentId === belief.id);
-  const inIncident = incidentClosure.includes(belief.id);
+  const agentName = (id: string) => board.agents.find((a) => a.id === id)?.name ?? id;
+  const beliefById = (id: string) => board.beliefs.find((b) => b.id === id);
+  const src = belief.sourceId ? board.sources.find((s) => s.id === belief.sourceId) : null;
+  const parents = board.derivations.filter((d) => d.childId === belief.id);
+  const children = board.derivations.filter((d) => d.parentId === belief.id);
+  const incidentSource = incidentSourceOf(board);
+  const inIncident = incidentSource
+    ? closureOverBoard(board, incidentSource.id).includes(belief.id)
+    : false;
 
   return (
     <div>
@@ -192,19 +208,21 @@ function BeliefInspector({ belief, status }: { belief: Belief; status: Belief["s
         </Section>
       )}
 
-      {inIncident && (
+      {inIncident && incidentSource && (
         <Section>
-          <IncidentPanel />
+          <IncidentPanel source={incidentSource} />
         </Section>
       )}
     </div>
   );
 }
 
-function SourceInspector({ sourceId }: { sourceId: string }) {
-  const src = SOURCES.find((s) => s.id === sourceId)!;
-  const own = BELIEFS.filter((b) => b.sourceId === sourceId);
-  const isIncident = sourceId === INCIDENT.sourceId;
+function SourceInspector({ board, sourceId }: { board: Board; sourceId: string }) {
+  const src = board.sources.find((s) => s.id === sourceId);
+  const agentName = (id: string) => board.agents.find((a) => a.id === id)?.name ?? id;
+  const own = board.beliefs.filter((b) => b.sourceId === sourceId);
+  if (!src) return <Empty />;
+  const isIncident = src.trust === "untrusted";
 
   return (
     <div>
@@ -232,14 +250,22 @@ function SourceInspector({ sourceId }: { sourceId: string }) {
 
       {isIncident && (
         <Section>
-          <IncidentPanel />
+          <IncidentPanel source={src} />
         </Section>
       )}
     </div>
   );
 }
 
-function IncidentPanel() {
+function IncidentPanel({ source }: { source: Source }) {
+  const live = useConsole((s) => s.live);
+  // Fixtures carry the scripted incident copy; a live untrusted source gets a
+  // generic but accurate line. Either way the action is the same recant.
+  const summary =
+    !live && source.id === INCIDENT.sourceId
+      ? INCIDENT.summary
+      : "This source is untrusted. Recanting it takes back every memory that grew from it, across every bot, in one transaction.";
+  const label = !live && source.id === INCIDENT.sourceId ? INCIDENT.id : source.label;
   return (
     <div className="rounded-md3-md bg-error-container p-3 text-on-error-container">
       <div className="flex items-center justify-between gap-2">
@@ -247,10 +273,10 @@ function IncidentPanel() {
           <Icon name="report" size={18} />
           Bad source alert
         </span>
-        <span className="mono text-label-sm">{INCIDENT.id}</span>
+        <span className="mono truncate text-label-sm">{label}</span>
       </div>
-      <p className="mt-1.5 text-body-sm">{INCIDENT.summary}</p>
-      <RecantDialog sourceId={INCIDENT.sourceId} />
+      <p className="mt-1.5 text-body-sm">{summary}</p>
+      <RecantDialog sourceId={source.id} />
     </div>
   );
 }

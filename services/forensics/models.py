@@ -107,3 +107,32 @@ class ArchiveOut(BaseModel):
     bucket: str
     keys: list[str]
     affidavit_generated_by: str
+
+
+class BoardAgent(BaseModel):
+    agent_id: UUID
+    name: str
+    region: str
+    pubkey8: str
+
+
+class BoardSource(BaseModel):
+    source_id: UUID
+    kind: str
+    uri: str
+    trust_tier: str
+    region: str
+
+
+class BoardOut(BaseModel):
+    """The whole provenance graph in one read, for the console board.
+
+    Read-only snapshot of the live seed: agents, sources, every belief with
+    its current status, and the derivation edges (explicit and vector-inferred)
+    that connect them. The console renders this exactly as it renders fixtures.
+    """
+
+    agents: list[BoardAgent]
+    sources: list[BoardSource]
+    beliefs: list[BeliefSnapshot]
+    derivations: list[DerivationOut]

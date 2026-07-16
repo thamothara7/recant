@@ -9,9 +9,8 @@ import {
 } from "@xyflow/react";
 import { BeliefCard } from "./BeliefCard";
 import { custodyEdgeIds, layout } from "../lib/graph";
-import { BELIEFS } from "../data/fixtures";
 import { STATUS_META } from "../lib/format";
-import { useConsole, useDisplayStatuses } from "../state/useConsole";
+import { useActiveBoard, useConsole, useDisplayStatuses } from "../state/useConsole";
 import { Chip } from "./m3";
 
 const nodeTypes = { belief: BeliefCard };
@@ -39,20 +38,26 @@ function AutoFit({ container }: { container: React.RefObject<HTMLDivElement> }) 
 }
 
 function BoardInner({ container }: { container: React.RefObject<HTMLDivElement> }) {
-  const base = useMemo(() => layout(), []);
+  const board = useActiveBoard();
+  // Re-layout only when the graph shape changes (fixtures are stable; live
+  // recant refetches the board and legitimately re-lays out).
+  const base = useMemo(
+    () => layout(board.beliefs, board.derivations),
+    [board.beliefs, board.derivations],
+  );
   const selected = useConsole((s) => s.selectedBelief);
   const hovered = useConsole((s) => s.hoverBelief);
   const recanting = useConsole((s) => s.recanting);
 
   // The custody thread lights along the selected (or hovered) belief's chain.
   const edges: Edge[] = useMemo(() => {
-    const lit = custodyEdgeIds(selected ?? hovered);
+    const lit = custodyEdgeIds(selected ?? hovered, board.derivations);
     return base.edges.map((e) => {
       if (!lit.has(e.id)) return e;
       const base2 = e.className?.includes("inferred") ? "rf-edge-inferred" : "rf-edge-explicit";
       return { ...e, className: `${base2} rf-edge-active`, animated: true };
     });
-  }, [base.edges, selected, hovered]);
+  }, [base.edges, selected, hovered, board.derivations]);
 
   return (
     <ReactFlow
@@ -92,6 +97,7 @@ function BoardInner({ container }: { container: React.RefObject<HTMLDivElement> 
 
 export function ProvenanceBoard() {
   const statuses = useDisplayStatuses();
+  const activeBoard = useActiveBoard();
   const suspect = Object.values(statuses).filter((v) => v === "suspect").length;
   const quarantined = Object.values(statuses).filter((v) => v === "quarantined").length;
   const boardRef = useRef<HTMLDivElement>(null);
@@ -107,7 +113,7 @@ export function ProvenanceBoard() {
         <div className="flex shrink-0 items-center gap-3">
           <h2 className="text-title-sm font-medium text-on-surface-variant">Memory board</h2>
           <span className="whitespace-nowrap text-body-sm text-on-surface-variant">
-            {BELIEFS.length} memories
+            {activeBoard.beliefs.length} memories
           </span>
           {explore && !hasSelection && (
             <span className="whitespace-nowrap text-body-sm text-on-surface-variant">

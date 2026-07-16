@@ -1,14 +1,17 @@
-import { AGENTS, BELIEFS, SOURCES } from "../data/fixtures";
-import type { AgentId, BeliefStatus, TrustTier } from "../data/types";
+import type { Belief, BeliefStatus, TrustTier } from "../data/types";
 import { STATUS_META, TRUST_META } from "../lib/format";
-import { useConsole, useDisplayStatuses } from "../state/useConsole";
+import { useActiveBoard, useConsole, useDisplayStatuses } from "../state/useConsole";
 import { Chip, Icon } from "./m3";
 
 // Worst status among a bot's memories decides its rail state.
 const RANK: Record<BeliefStatus, number> = { active: 0, retracted: 1, suspect: 2, quarantined: 3 };
 
-function agentState(agentId: AgentId, statuses: Record<string, BeliefStatus>): BeliefStatus {
-  return BELIEFS.filter((b) => b.agentId === agentId).reduce<BeliefStatus>((worst, b) => {
+function agentState(
+  agentId: string,
+  beliefs: Belief[],
+  statuses: Record<string, BeliefStatus>,
+): BeliefStatus {
+  return beliefs.filter((b) => b.agentId === agentId).reduce<BeliefStatus>((worst, b) => {
     const s = statuses[b.id] ?? b.status;
     return RANK[s] > RANK[worst] ? s : worst;
   }, "active");
@@ -23,6 +26,7 @@ const TRUST_ICON: Record<TrustTier, string> = {
 
 export function LeftRail() {
   const statuses = useDisplayStatuses();
+  const board = useActiveBoard();
   const advanced = useConsole((s) => s.advanced);
   const selectedSource = useConsole((s) => s.selectedSource);
   const selectSource = useConsole((s) => s.selectSource);
@@ -31,8 +35,8 @@ export function LeftRail() {
     <aside className="flex w-[280px] shrink-0 flex-col overflow-y-auto">
       <h2 className="px-4 pb-2 pt-4 text-title-sm font-medium text-on-surface-variant">Your bots</h2>
       <div className="flex flex-col">
-        {AGENTS.map((a) => {
-          const st = agentState(a.id, statuses);
+        {board.agents.map((a) => {
+          const st = agentState(a.id, board.beliefs, statuses);
           const m = STATUS_META[st];
           return (
             <div key={a.id} className="flex h-14 w-full items-center gap-3 rounded-full px-4 text-left text-on-surface">
@@ -48,7 +52,9 @@ export function LeftRail() {
                     {a.region}
                   </span>
                 ) : (
-                  <span className="block truncate text-body-sm text-on-surface-variant">{a.role}</span>
+                  <span className="block truncate text-body-sm text-on-surface-variant">
+                    {a.role || a.region}
+                  </span>
                 )}
               </span>
               <Chip
@@ -67,7 +73,7 @@ export function LeftRail() {
         Click a source to see every memory that grew from it.
       </p>
       <div className="flex flex-col pb-4">
-        {SOURCES.map((src) => {
+        {board.sources.map((src) => {
           const on = selectedSource === src.id;
           return (
             <button

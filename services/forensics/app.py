@@ -34,6 +34,9 @@ from services.forensics.models import (
     ArchiveOut,
     BeliefSnapshot,
     BeliefsPage,
+    BoardAgent,
+    BoardOut,
+    BoardSource,
     CustodyChainOut,
     CustodyStep,
     DerivationOut,
@@ -145,6 +148,57 @@ def healthz():
     except Exception:
         raise HTTPException(status_code=503, detail="database unreachable")
     return {"status": "ok"}
+
+
+@app.get("/board", response_model=BoardOut)
+def board(response: Response):
+    """The whole provenance graph in one read, for the console board.
+
+    Read-only. One serializable transaction so the beliefs and the edges that
+    connect them are a consistent snapshot (no belief referencing a derivation
+    to a row a concurrent writer has not committed).
+    """
+    t0 = time.perf_counter()
+
+    def txn(conn: psycopg.Connection):
+        agents = conn.execute(
+            "SELECT agent_id, name, region, pubkey FROM agents ORDER BY name"
+        ).fetchall()
+        sources = conn.execute(
+            "SELECT source_id, kind, uri, trust_tier, region FROM sources"
+            " ORDER BY created_at"
+        ).fetchall()
+        beliefs = conn.execute(
+            f"SELECT {_BELIEF_COLS} FROM beliefs b ORDER BY b.agent_id, b.seq"
+        ).fetchall()
+        derivations = conn.execute(
+            "SELECT child_id, parent_id, kind, score FROM derivations"
+        ).fetchall()
+        return agents, sources, beliefs, derivations
+
+    agents, sources, beliefs, derivations = run_txn(txn)
+    ms = int((time.perf_counter() - t0) * 1000)
+    response.headers.append("X-Recant-Primitive", f"SERIALIZABLE TXN | {ms}ms")
+
+    return BoardOut(
+        agents=[
+            BoardAgent(
+                agent_id=r[0], name=r[1], region=r[2], pubkey8=bytes(r[3]).hex()[:8]
+            )
+            for r in agents
+        ],
+        sources=[
+            BoardSource(
+                source_id=r[0], kind=r[1], uri=r[2], trust_tier=r[3], region=r[4]
+            )
+            for r in sources
+        ],
+        beliefs=[_belief_snapshot(r) for r in beliefs],
+        derivations=[
+            DerivationOut(child_id=r[0], parent_id=r[1], kind=r[2], score=r[3])
+            for r in derivations
+        ],
+    )
 
 
 @app.get("/agents/{agent_id}/beliefs", response_model=BeliefsPage)

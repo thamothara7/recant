@@ -46,11 +46,18 @@ export function App() {
 
   // First visit: start the walkthrough at step 1. A browser that already
   // finished it (localStorage flag) opens straight into Explore; the Story
-  // tab replays the walkthrough on demand.
+  // tab replays the walkthrough on demand. Live mode always opens in Explore
+  // (Story is the scripted fixtures) and fetches the real board.
   useEffect(() => {
     const s = useConsole.getState();
-    if (isStoryDone()) s.setMode("explore");
-    else s.setStoryStep(0);
+    if (s.live) {
+      s.setMode("explore");
+      void s.loadBoard();
+    } else if (isStoryDone()) {
+      s.setMode("explore");
+    } else {
+      s.setStoryStep(0);
+    }
   }, []);
 
   const wide = useWide();

@@ -5,7 +5,9 @@
 export type BeliefStatus = "active" | "suspect" | "quarantined" | "retracted";
 export type TrustTier = "verified" | "partner" | "public" | "untrusted";
 export type DerivationKind = "explicit" | "inferred";
-export type AgentId = "researcher" | "support" | "ops";
+// Fixture ids are readable slugs ("researcher"); live ids are UUIDs. Either way
+// an agent id is just an opaque string key.
+export type AgentId = string;
 
 export interface Agent {
   id: AgentId;
