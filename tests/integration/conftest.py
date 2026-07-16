@@ -49,9 +49,14 @@ def clean_tables():
     if not os.environ.get("DATABASE_URL"):
         yield
         return
-    from services.common.db import get_pool
+    from services.common.db import run_txn
 
-    with get_pool().connection() as conn:
+    # Run the cleanup through run_txn so it retries on SQLSTATE 40001 exactly
+    # like every production write does. Without the retry, a serialization
+    # conflict on a contended cluster (concurrent services, or the unlicensed
+    # local cluster's transaction throttle) errored this fixture at setup and
+    # cascaded into unrelated test failures.
+    def _clean(conn):
         # FK order: fanout_deliveries references memory_events; agent_actions
         # references agents and incidents. agent_memory and message_store are
         # runtime tables bootstrapped outside the migration chain, so they may
@@ -71,4 +76,6 @@ def clean_tables():
         for table in ("agent_memory", "message_store"):
             if conn.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0]:
                 conn.execute(f"DELETE FROM {table}")
+
+    run_txn(_clean)
     yield

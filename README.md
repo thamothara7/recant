@@ -163,6 +163,21 @@ fall back cleanly without credentials. `RECANT_EVIDENCE_BUCKET` enables the S3
 archive endpoint. The cloud fanout Lambdas are packaged and deployed by
 `fanout/iac/package.sh` and `fanout/iac/deploy.sh`.
 
+### Scale
+
+`ops/scale_test.py` builds a large fleet and a deep contamination tree, then
+proves one recant flips exactly the contaminated closure in a single
+serializable transaction and leaves every clean belief untouched. Measured on
+the local 3-node cluster: a 300-belief closure across 20 agents flips in 269ms,
+and an 800-belief closure across 40 agents (2000 beliefs total) in 776ms, both
+idempotent on a repeat recant. The flip is roughly linear in closure size and
+stays sub-second.
+
+```bash
+export DATABASE_URL=postgresql://root@localhost:26257/recant?sslmode=disable
+SCALE_AGENTS=40 SCALE_TAINTED=800 SCALE_NOISE=1200 uv run python ops/scale_test.py
+```
+
 ## Integrating your agents
 
 Recant is a memory substrate your agents write through and query, not an app you
