@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
 import psycopg
@@ -23,6 +23,10 @@ from services.attest_gateway.signer import dev_action_signer_for, verify_signatu
 from services.common.config import cors_origins
 from services.common.db import get_pool, run_txn
 from services.common.logging import bind_incident, configure
+from services.forensics.affidavit import (
+    generate_affidavit,
+    generate_affidavit_text,  # noqa: F401  (re-export; unit tests import from here)
+)
 from services.forensics.models import (
     ActionOut,
     AffidavitOut,
@@ -126,84 +130,6 @@ def _derivations_for(
         if r[1] == belief_id
     ]
     return parents, children
-
-
-# ---------------------------------------------------------------------------
-# affidavit template (standalone for unit testing)
-# ---------------------------------------------------------------------------
-
-def generate_affidavit_text(
-    *,
-    incident_id: UUID,
-    created_at: datetime,
-    opened_by: str,
-    source_id: UUID,
-    source_kind: str,
-    source_uri: str,
-    source_trust_tier: str,
-    belief_count: int,
-    agents_affected: list[dict],
-    actions: list[dict],
-    events: list[dict],
-) -> str:
-    """Generate a text-template incident affidavit from structured data.
-
-    This is the Bedrock stub: when U3 arrives, Claude generates the text
-    instead. The function is standalone so unit tests can exercise it
-    without a database.
-    """
-    lines = [
-        "INCIDENT AFFIDAVIT",
-        "==================",
-        f"Incident ID: {incident_id}",
-        f"Opened:      {created_at.strftime('%Y-%m-%d %H:%M:%S')} UTC",
-        f"Opened by:   {opened_by}",
-        "",
-        "SOURCE",
-        "------",
-        f"Source ID:   {source_id}",
-        f"Kind:        {source_kind}",
-        f"URI:         {source_uri}",
-        f"Trust tier:  {source_trust_tier}",
-        "",
-        "IMPACT",
-        "------",
-        f"{belief_count} belief(s) quarantined across {len(agents_affected)} agent(s).",
-        "",
-    ]
-    for agent in agents_affected:
-        lines.append(
-            f"  Agent \"{agent['agent_name']}\": {agent['belief_count']} belief(s) quarantined"
-        )
-
-    lines.extend(["", "QUARANTINE ACTIONS", "------------------"])
-    if not actions:
-        lines.append("  (none recorded)")
-    for act in actions:
-        lines.append(f"  Action ID:  {act['action_id']}")
-        lines.append(f"  Signature:  {act['sig'][:16]}... ({act['sig_status']})")
-        lines.append(f"  Flipped:    {act['belief_count']} belief(s)")
-        lines.append("")
-
-    lines.extend(["EVENTS TIMELINE", "---------------"])
-    if not events:
-        lines.append("  (no events recorded)")
-    for evt in events:
-        if isinstance(evt["created_at"], datetime):
-            ts = evt["created_at"].strftime("%H:%M:%S")
-        else:
-            ts = str(evt["created_at"])
-        lines.append(f"  {ts} | {evt['kind']} | {evt.get('summary', '')}")
-
-    lines.extend([
-        "",
-        "---",
-        "This affidavit was generated from database records using a text template.",
-        "Bedrock Claude integration pending (U3).",
-        "",
-        f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC",
-    ])
-    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +373,13 @@ def incident_summary(incident_id: UUID, response: Response):
 
 @app.get("/incidents/{incident_id}/affidavit", response_model=AffidavitOut)
 def affidavit(incident_id: UUID, response: Response):
-    """Text-template forensic affidavit. Bedrock Claude replaces this under U3."""
+    """Forensic affidavit from the incident records.
+
+    RECANT_AFFIDAVIT selects the generator: the deterministic text template
+    (default; offline and used by tests) or Bedrock Claude, which writes the
+    affidavit from the same structured facts and falls back to the template
+    on any Bedrock failure.
+    """
     # Reuse the incident summary logic
     summary = incident_summary(incident_id, response)
 
@@ -474,21 +406,22 @@ def affidavit(incident_id: UUID, response: Response):
         for evt in summary.events
     ]
 
-    text = generate_affidavit_text(
-        incident_id=incident_id,
-        created_at=summary.created_at,
-        opened_by=summary.opened_by,
-        source_id=summary.source_id,
-        source_kind=summary.source_kind,
-        source_uri=summary.source_uri,
-        source_trust_tier=summary.source_trust_tier,
-        belief_count=summary.closure_size,
-        agents_affected=summary.agents_affected,
-        actions=actions_for_text,
-        events=events_for_text,
-    )
+    structured = {
+        "incident_id": incident_id,
+        "created_at": summary.created_at,
+        "opened_by": summary.opened_by,
+        "source_id": summary.source_id,
+        "source_kind": summary.source_kind,
+        "source_uri": summary.source_uri,
+        "source_trust_tier": summary.source_trust_tier,
+        "belief_count": summary.closure_size,
+        "agents_affected": summary.agents_affected,
+        "actions": actions_for_text,
+        "events": events_for_text,
+    }
+    text, generated_by = generate_affidavit(structured)
 
-    return AffidavitOut(incident_id=incident_id, generated_by="template", text=text)
+    return AffidavitOut(incident_id=incident_id, generated_by=generated_by, text=text)
 
 
 @app.get("/beliefs/{belief_id}/provenance", response_model=ProvenanceOut)

@@ -39,7 +39,7 @@ def test_normal_affidavit():
     assert "support" in text
     assert "untrusted" in text
     assert "valid" in text
-    assert "Bedrock Claude integration pending" in text
+    assert "generated from database records using a text template" in text
 
 
 def test_zero_closure_affidavit():
