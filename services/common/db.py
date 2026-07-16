@@ -22,7 +22,17 @@ _pool: ConnectionPool | None = None
 def get_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
-        _pool = ConnectionPool(os.environ["DATABASE_URL"], min_size=1, max_size=10)
+        # check= validates each connection at checkout and transparently
+        # replaces dead ones, so a long-running service survives a database
+        # restart (node kill, ops/chaos/reset.sh) without a bounce. Without it,
+        # every pooled connection that died with the old server produces one
+        # 500 before the pool heals; seen live 2026-07-16.
+        _pool = ConnectionPool(
+            os.environ["DATABASE_URL"],
+            min_size=1,
+            max_size=10,
+            check=ConnectionPool.check_connection,
+        )
     return _pool
 
 

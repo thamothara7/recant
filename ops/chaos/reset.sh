@@ -18,6 +18,15 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 export DATABASE_URL="${DATABASE_URL:-postgresql://root@localhost:26257/recant?sslmode=disable}"
 
+# Stop any running Recant services first: resetting the database under a live
+# service leaves its connection pool pointing at a dead server (the pool now
+# self-heals at checkout, but a clean stop/start is still the tidy path).
+if pgrep -f "uvicorn services" >/dev/null 2>&1; then
+    echo "stopping running Recant services..."
+    pkill -f "uvicorn services" || true
+    sleep 1
+fi
+
 echo "destroying cluster volumes (resets the concurrency throttle)..."
 docker compose -f ops/chaos/docker-compose.yml down -v
 bash ops/chaos/init.sh

@@ -24,6 +24,14 @@ fi
 # Let the console read the judge-overlay header cross-origin in dev.
 export RECANT_CORS_ORIGINS="${RECANT_CORS_ORIGINS:-http://localhost:5173}"
 
+# Pre-flight: fail with one clear message instead of three uvicorn bind errors.
+BUSY=$(lsof -nP -ti :8000 -ti :8001 -ti :8002 2>/dev/null || true)
+if [ -n "$BUSY" ]; then
+    echo "ports 8000/8001/8002 are already in use (pids: $(echo "$BUSY" | tr '\n' ' '))." >&2
+    echo "probably an earlier launch; stop it with:  pkill -f 'uvicorn services'" >&2
+    exit 1
+fi
+
 pids=()
 uv run uvicorn services.attest_gateway.app:app --port 8000 & pids+=("$!")
 uv run uvicorn services.quarantine.app:app     --port 8001 & pids+=("$!")
