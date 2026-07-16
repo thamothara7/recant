@@ -21,3 +21,6 @@ console/.playwright-mcp/
 console/**/*.tsbuildinfo
 console/vite.config.js
 console/vite.config.d.ts
+.vercel
+.env*
+!.env.example
