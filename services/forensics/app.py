@@ -27,9 +27,11 @@ from services.forensics.affidavit import (
     generate_affidavit,
     generate_affidavit_text,  # noqa: F401  (re-export; unit tests import from here)
 )
+from services.forensics.archive import MissingBucket, S3EvidenceArchiver
 from services.forensics.models import (
     ActionOut,
     AffidavitOut,
+    ArchiveOut,
     BeliefSnapshot,
     BeliefsPage,
     CustodyChainOut,
@@ -371,18 +373,9 @@ def incident_summary(incident_id: UUID, response: Response):
     return result
 
 
-@app.get("/incidents/{incident_id}/affidavit", response_model=AffidavitOut)
-def affidavit(incident_id: UUID, response: Response):
-    """Forensic affidavit from the incident records.
-
-    RECANT_AFFIDAVIT selects the generator: the deterministic text template
-    (default; offline and used by tests) or Bedrock Claude, which writes the
-    affidavit from the same structured facts and falls back to the template
-    on any Bedrock failure.
-    """
-    # Reuse the incident summary logic
-    summary = incident_summary(incident_id, response)
-
+def _affidavit_structured(incident_id: UUID, summary: IncidentSummary) -> dict:
+    """The structured facts both affidavit generators consume (and the
+    archive bundles), assembled once from the incident summary."""
     actions_for_text = [
         {
             "action_id": str(act.action_id),
@@ -406,7 +399,7 @@ def affidavit(incident_id: UUID, response: Response):
         for evt in summary.events
     ]
 
-    structured = {
+    return {
         "incident_id": incident_id,
         "created_at": summary.created_at,
         "opened_by": summary.opened_by,
@@ -419,9 +412,64 @@ def affidavit(incident_id: UUID, response: Response):
         "actions": actions_for_text,
         "events": events_for_text,
     }
-    text, generated_by = generate_affidavit(structured)
 
+
+@app.get("/incidents/{incident_id}/affidavit", response_model=AffidavitOut)
+def affidavit(incident_id: UUID, response: Response):
+    """Forensic affidavit from the incident records.
+
+    RECANT_AFFIDAVIT selects the generator: the deterministic text template
+    (default; offline and used by tests) or Bedrock Claude, which writes the
+    affidavit from the same structured facts and falls back to the template
+    on any Bedrock failure.
+    """
+    # Reuse the incident summary logic
+    summary = incident_summary(incident_id, response)
+    text, generated_by = generate_affidavit(_affidavit_structured(incident_id, summary))
     return AffidavitOut(incident_id=incident_id, generated_by=generated_by, text=text)
+
+
+@app.post("/incidents/{incident_id}/archive", response_model=ArchiveOut)
+def archive(incident_id: UUID, response: Response):
+    """Write the incident's evidence bundle to S3 (W4 archive leg).
+
+    The bundle is everything a DB-less verifier needs under one prefix:
+    the incident summary (with per-action signature verdicts), the
+    affidavit, and the custody chain of every affected agent. The database
+    is only read; the side effect is the S3 write.
+    """
+    summary = incident_summary(incident_id, response)
+    text, generated_by = generate_affidavit(_affidavit_structured(incident_id, summary))
+
+    documents: dict[str, tuple[str, str]] = {
+        "incident.json": (summary.model_dump_json(indent=2), "application/json"),
+        "affidavit.txt": (text, "text/plain; charset=utf-8"),
+    }
+    for agent in summary.agents_affected:
+        chain_out = custody_chain(UUID(agent["agent_id"]), response)
+        documents[f"custody/{agent['agent_id']}.json"] = (
+            chain_out.model_dump_json(indent=2),
+            "application/json",
+        )
+
+    archiver = S3EvidenceArchiver()
+    try:
+        keys = archiver.put_bundle(incident_id, documents)
+        bucket = archiver.bucket
+    except MissingBucket as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    with bind_incident(str(incident_id)):
+        log.info(
+            "evidence archived",
+            extra={"fields": {"bucket": bucket, "keys": len(keys)}},
+        )
+    return ArchiveOut(
+        incident_id=incident_id,
+        bucket=bucket,
+        keys=keys,
+        affidavit_generated_by=generated_by,
+    )
 
 
 @app.get("/beliefs/{belief_id}/provenance", response_model=ProvenanceOut)

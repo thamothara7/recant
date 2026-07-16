@@ -98,3 +98,12 @@ class BeliefsPage(BaseModel):
     as_of: str | None = None
     beliefs: list[BeliefSnapshot]
     count: int
+
+
+class ArchiveOut(BaseModel):
+    """Receipt for one archived evidence bundle."""
+
+    incident_id: UUID
+    bucket: str
+    keys: list[str]
+    affidavit_generated_by: str

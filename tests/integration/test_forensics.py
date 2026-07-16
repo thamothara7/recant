@@ -263,6 +263,67 @@ class TestAffidavit:
 
 
 @requires_db
+class TestArchive:
+    def test_archive_bundles_incident_evidence(
+        self, client, forensics_client, quarantine_client, monkeypatch
+    ):
+        """The bundle carries the incident summary, the affidavit, and one
+        custody chain per affected agent, all under the incident's prefix.
+        S3 is a fake; the endpoint's DB reads run against the live cluster."""
+        puts: list[dict] = []
+
+        class _FakeS3:
+            def put_object(self, **kwargs):
+                puts.append(kwargs)
+                return {"ETag": '"x"'}
+
+        from services.forensics.archive import S3EvidenceArchiver
+
+        monkeypatch.setenv("RECANT_EVIDENCE_BUCKET", "evidence-test")
+        monkeypatch.setattr(S3EvidenceArchiver, "_s3", lambda self: _FakeS3())
+
+        agent, source, belief = _seed_scenario(client)
+        recant_r = quarantine_client.post(
+            "/recant", json={"source_id": source["source_id"], "actor": "operator"}
+        )
+        incident_id = recant_r.json()["incident_id"]
+
+        r = forensics_client.post(f"/incidents/{incident_id}/archive")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["bucket"] == "evidence-test"
+        assert data["affidavit_generated_by"] == "template"
+        assert f"incidents/{incident_id}/incident.json" in data["keys"]
+        assert f"incidents/{incident_id}/affidavit.txt" in data["keys"]
+        assert any(k.startswith(f"incidents/{incident_id}/custody/") for k in data["keys"])
+        assert len(puts) == len(data["keys"])
+
+        import json as _json
+
+        by_key = {p["Key"]: p for p in puts}
+        incident_doc = _json.loads(by_key[f"incidents/{incident_id}/incident.json"]["Body"])
+        assert incident_doc["actions"][0]["sig_valid"] is True
+        affidavit_doc = by_key[f"incidents/{incident_id}/affidavit.txt"]["Body"].decode()
+        assert "INCIDENT AFFIDAVIT" in affidavit_doc
+        custody_key = next(k for k in by_key if "/custody/" in k)
+        custody_doc = _json.loads(by_key[custody_key]["Body"])
+        assert custody_doc["valid"] is True
+
+    def test_archive_without_bucket_is_503(
+        self, client, forensics_client, quarantine_client, monkeypatch
+    ):
+        monkeypatch.delenv("RECANT_EVIDENCE_BUCKET", raising=False)
+        agent, source, belief = _seed_scenario(client)
+        recant_r = quarantine_client.post(
+            "/recant", json={"source_id": source["source_id"], "actor": "operator"}
+        )
+        incident_id = recant_r.json()["incident_id"]
+        r = forensics_client.post(f"/incidents/{incident_id}/archive")
+        assert r.status_code == 503
+        assert "RECANT_EVIDENCE_BUCKET" in r.json()["detail"]
+
+
+@requires_db
 class TestProvenance:
     def test_provenance(self, client, forensics_client):
         agent = client.post(
