@@ -4,7 +4,11 @@ cd "$(dirname "$0")"
 
 docker compose up -d
 sleep 3
-docker compose exec roach1 ./cockroach init --insecure --host=roach1:26257 2>/dev/null || true
+# init is a one-time operation; on a cluster that is already initialized it
+# prints "ERROR: cluster has already been initialized" to stdout (not stderr),
+# which is expected on every re-run. Silence both streams so a re-run is clean;
+# the "cluster ready" line at the end is the real success signal.
+docker compose exec roach1 ./cockroach init --insecure --host=roach1:26257 >/dev/null 2>&1 || true
 
 attempts=0
 max_attempts=60
