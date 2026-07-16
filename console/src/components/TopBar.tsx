@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useConsole } from "../state/useConsole";
+import { LogoMark } from "./LogoMark";
 import { Icon, IconButton } from "./m3";
 
 // Product chrome stays product chrome: brand, Story/Explore switch, theme,
@@ -31,9 +32,7 @@ export function TopBar() {
     <>
       <header className="flex h-16 shrink-0 items-center justify-between px-4">
         <div className="flex items-center gap-3">
-          <div className="grid h-8 w-8 place-items-center rounded-md3-sm bg-primary text-on-primary">
-            <span className="text-label-lg font-medium">R</span>
-          </div>
+          <LogoMark />
           <div className="text-title-lg text-on-surface">Recant</div>
         </div>
 

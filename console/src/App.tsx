@@ -1,6 +1,22 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "./components/AppShell";
+import { MobileSummary } from "./components/MobileSummary";
 import { useConsole } from "./state/useConsole";
+
+// The board needs room (skill 4: desktop-first). Below the laptop breakpoint
+// the console renders the read-only incident summary instead of squeezing an
+// illegible graph onto a phone.
+const WIDE = "(min-width: 1024px)";
+function useWide(): boolean {
+  const [wide, setWide] = useState(() => window.matchMedia(WIDE).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE);
+    const onChange = (e: MediaQueryListEvent) => setWide(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return wide;
+}
 
 // Keyboard. Always: arrow keys step the story. Advanced only: J toggles the
 // Judge Overlay, V toggles Recording Mode, R resets, 1-6 fire the proof moments
@@ -32,9 +48,11 @@ export function App() {
     useConsole.getState().setStoryStep(0);
   }, []);
 
+  const wide = useWide();
+
   return (
     <div className="h-full">
-      <AppShell />
+      {wide ? <AppShell /> : <MobileSummary />}
     </div>
   );
 }

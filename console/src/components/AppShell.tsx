@@ -31,6 +31,7 @@ export function AppShell() {
   const aostHours = useConsole((s) => s.aostHours);
   const pastMode = aostHours < 0;
   const recording = useConsole((s) => s.recordingMode);
+  const hasSelection = useConsole((s) => !!(s.selectedBelief || s.selectedSource));
 
   const story = mode === "story";
   // The rewind slider appears once the story introduces it, and always in Explore.
@@ -69,7 +70,11 @@ export function AppShell() {
             </div>
           )}
         </main>
-        {!story && (
+        {/* The details panel earns its 360px only when something is selected;
+            an always-open empty panel was the single biggest source of
+            first-glance clutter in Explore. AutoFit refits the board when the
+            panel appears, so cards are never guillotined. */}
+        {!story && hasSelection && (
           <div className="w-[360px] shrink-0 overflow-y-auto rounded-md3-lg bg-surface">
             <Inspector />
           </div>

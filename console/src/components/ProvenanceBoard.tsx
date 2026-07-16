@@ -27,7 +27,7 @@ function AutoFit({ container }: { container: React.RefObject<HTMLDivElement> }) 
     let raf = 0;
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => fitView({ padding: 0.18, duration: 200 }));
+      raf = requestAnimationFrame(() => fitView({ padding: 0.12, duration: 200 }));
     });
     ro.observe(el);
     return () => {
@@ -60,7 +60,7 @@ function BoardInner({ container }: { container: React.RefObject<HTMLDivElement> 
       edges={edges}
       nodeTypes={nodeTypes}
       fitView
-      fitViewOptions={{ padding: 0.18 }}
+      fitViewOptions={{ padding: 0.12 }}
       minZoom={0.5}
       maxZoom={1.4}
       nodesDraggable={false}
@@ -95,6 +95,9 @@ export function ProvenanceBoard() {
   const suspect = Object.values(statuses).filter((v) => v === "suspect").length;
   const quarantined = Object.values(statuses).filter((v) => v === "quarantined").length;
   const boardRef = useRef<HTMLDivElement>(null);
+  // The one-line hint replaces the old always-open empty details panel.
+  const explore = useConsole((s) => s.mode === "explore");
+  const hasSelection = useConsole((s) => !!(s.selectedBelief || s.selectedSource));
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col bg-surface">
@@ -106,6 +109,11 @@ export function ProvenanceBoard() {
           <span className="whitespace-nowrap text-body-sm text-on-surface-variant">
             {BELIEFS.length} memories
           </span>
+          {explore && !hasSelection && (
+            <span className="whitespace-nowrap text-body-sm text-on-surface-variant">
+              Click a card for its full story
+            </span>
+          )}
           {suspect > 0 && (
             <Chip
               icon={STATUS_META.suspect.icon}
