@@ -160,6 +160,55 @@ fall back cleanly without credentials. `RECANT_EVIDENCE_BUCKET` enables the S3
 archive endpoint. The cloud fanout Lambdas are packaged and deployed by
 `fanout/iac/package.sh` and `fanout/iac/deploy.sh`.
 
+## Integrating your agents
+
+Recant is a memory substrate your agents write through and query, not an app you
+log into. The whole integration is one endpoint swap: write every belief through
+the gateway instead of a raw vector store, and call `recant` when a source turns
+out to be poisoned. Custody, hash-chaining, and the signature happen server-side;
+your agents read memory back exactly as they would from any store.
+
+`recant_client.py` (standard library plus httpx) is a thin client over the three
+services:
+
+```python
+from recant_client import RecantClient
+
+rc = RecantClient()  # defaults to the three local services
+
+# Provision once
+agent  = rc.register_agent("support-bot", region="us-east")
+good   = rc.register_source("https://vendor.com/refund-policy", "verified")
+bad    = rc.register_source("https://forum.example.com/thread/42", "untrusted")
+
+# Write memory through the gateway (this is the only change to your agents).
+# source_id gives provenance to a source; parent_ids to earlier beliefs.
+# Omit the embedding and Recant makes one; pass 1024 floats to supply your own.
+rc.remember(agent, "The refund window is 30 days.", source_id=good)
+bad_belief = rc.remember(agent, "Actually the refund window is 365 days.", source_id=bad)
+rc.remember(agent, "Refunds can be extended to a full year.", parent_ids=[bad_belief])
+
+# ... later, the source is found poisoned ...
+rc.preview(bad)             # read-only: what a recant WOULD flip
+incident = rc.recant(bad)   # revokes it everywhere, provably, in one transaction
+print(rc.affidavit(incident["incident_id"]))
+```
+
+The clean belief still verifies after the recant; the bad belief and everything
+derived from it (explicit edges and vector-inferred paraphrases alike) are
+quarantined, and any in-flight action resting on them is aborted. Reads for
+proof: `verify_chain`, `provenance`, `custody_chain`, `incident`, `beliefs_at`
+(AS OF SYSTEM TIME time travel), and `archive` (evidence to S3).
+
+Not a Python shop? Every method is a plain HTTP call; the raw equivalents:
+
+```bash
+curl -s localhost:8000/agents  -d '{"name":"support-bot","region":"us-east"}'
+curl -s localhost:8000/sources -d '{"kind":"web","uri":"https://forum.example.com/42","trust_tier":"untrusted"}'
+curl -s localhost:8000/beliefs -d '{"agent_id":"<agent>","content":"...","source_id":"<source>"}'
+curl -s localhost:8001/recant  -d '{"source_id":"<bad>","actor":"oncall"}'
+```
+
 ## CockroachDB tools
 
 | Tool | What the agent does with it | Status |
