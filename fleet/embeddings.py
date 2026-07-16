@@ -7,20 +7,11 @@ lands under U3 by setting RECANT_EMBEDDER=titan with zero fleet changes.
 
 from __future__ import annotations
 
-import os
-
 from langchain_core.embeddings import Embeddings
 
-from services.common.embedder import Embedder, HashEmbedder
+from services.common.embedder import Embedder, select_embedder
 
-
-def select_embedder() -> Embedder:
-    name = os.environ.get("RECANT_EMBEDDER", "hash")
-    if name == "hash":
-        return HashEmbedder()
-    if name == "titan":  # pragma: no cover - lands with U3
-        raise NotImplementedError("titan embedder arrives with U3 (Bedrock credentials)")
-    raise ValueError(f"unknown RECANT_EMBEDDER: {name!r}")
+__all__ = ["Embedder", "LangChainEmbedder", "select_embedder"]
 
 
 class LangChainEmbedder(Embeddings):

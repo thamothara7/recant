@@ -20,7 +20,7 @@ from uuid import UUID
 
 import psycopg
 
-from services.common.embedder import HashEmbedder
+from services.common.embedder import active_threshold
 
 KNN_TOP_K = int(os.environ.get("RECANT_TAINT_TOP_K", "20"))
 KNN_MAX_K = int(os.environ.get("RECANT_TAINT_MAX_K", "320"))
@@ -32,8 +32,10 @@ _TAINTABLE = ("active", "suspect")
 
 
 def default_threshold() -> float:
-    env = os.environ.get("RECANT_TAINT_THRESHOLD")
-    return float(env) if env else HashEmbedder.default_threshold
+    # Tracks the selected embedder (RECANT_EMBEDDER); RECANT_TAINT_THRESHOLD
+    # overrides. The taint engine compares stored vectors and never re-embeds,
+    # so only this threshold constant depends on the embedding model.
+    return active_threshold()
 
 
 @dataclass
