@@ -24,36 +24,50 @@ Recant is not a RAG app, not a chatbot, and not a memory layer. It is the
 provenance and retraction substrate underneath memory layers, the same role
 Sigstore and SLSA play for the software supply chain.
 
-## Status: Week 1 of 6
+Live console (deterministic demo, no backend needed): https://recant.vercel.app
 
-What works today:
+## Status
 
-- Full CockroachDB schema (`sources`, `agents`, `beliefs`, `derivations`,
-  `incidents`, `quarantine_actions`, `memory_events`) applied by numbered raw
-  SQL migrations, with a vector index on belief embeddings and a row-level TTL
-  for beliefs sourced from untrusted-tier sources. Confirmed Jul 2 against the
-  local `cockroachdb/cockroach:latest-v26.2` arm64 image: `CREATE VECTOR
-  INDEX` applies cleanly (migrations 0001-0003).
-- attest-gateway: the only write path into memory. Every belief write happens
-  inside one serializable transaction that reads the agent's chain head
-  `FOR UPDATE`, computes a hash-chained payload, signs it with a deterministic
-  Ed25519 dev key, and advances the head. Writes retry on SQLSTATE 40001 with
-  jitter. Belief writes accept an optional client-supplied embedding; there is
-  no fake embedder yet (see AWS services table below).
-- Deterministic seed fixtures (3 agents, 4 sources, 7 beliefs, including one
-  explicit derivation edge) created entirely through the gateway API.
-- A local 3-node CockroachDB chaos cluster (`ops/chaos/`), bound to loopback
-  only, for the node-kill proof moment, and a changefeed-tier spike report
-  (`docs/spike-changefeeds.md`).
-- Unit tests for the hash chain, dev signer, migration runner, and
-  transaction retry policy, plus an integration suite for the gateway that is
-  skipped unless `DATABASE_URL` is set. The full suite is 33 tests (17 unit,
-  16 integration) and green against the live local cluster, including
-  regression tests for chain-signature forgery and tail truncation.
+The full contamination-to-recant-to-proof path works end to end. 150 tests
+green against the live local 3-node cluster.
 
-Not yet built: the taint engine, quarantine service, changefeed fanout,
-forensics API, demo fleet agents, and console. See the architecture summary
-below for what each of those is and when it lands.
+- **Attested writes (attest-gateway).** The only write path into memory. Every
+  belief write runs in one serializable transaction that reads the agent's
+  chain head `FOR UPDATE`, hash-chains and Ed25519-signs the payload, and
+  advances the head; writes retry on SQLSTATE 40001 with jitter. A direct
+  `UPDATE` that bypasses the gateway is caught by chain and signature
+  verification (regression-tested).
+- **Taint engine + recant.** `recant(source_id)` runs one serializable
+  transaction that computes the full contamination closure, explicit edges via
+  a recursive CTE over `derivations` plus vector kNN for paraphrased copies
+  that carry no provenance edge, flips it all to quarantined, opens the
+  incident, and writes an attested, self-verifying quarantine action.
+- **Fleet + eviction.** Three agents (researcher, support, ops) on
+  langchain-cockroachdb working memory. An outbox worker fans the recant out to
+  running agents: it deletes evicted beliefs from working memory and aborts
+  pending actions resting on them, exactly-once per consumer via a durable
+  delivery ledger.
+- **Forensics API.** AS OF SYSTEM TIME belief history (time travel), custody
+  chain and single-belief provenance with live chain + signature verification,
+  incident summaries that re-verify each quarantine action from stored rows,
+  Bedrock Claude affidavits (with a deterministic template fallback), and an S3
+  evidence-bundle archive. Tamper is proven detected, not just assumed.
+- **Console.** The judge-facing UI (`console/`, Material 3, deployed to Vercel).
+  Story mode is a scripted walkthrough; Explore drives the live backend when
+  configured (real board, real recant, real time-travel), and falls back to
+  deterministic fixtures otherwise.
+- **AWS, live.** Bedrock Titan Text Embeddings V2 (verified 1024-dim, threshold
+  calibrated) and Claude affidavits; S3 evidence archive; the changefeed to
+  Lambda to EventBridge fanout is deployed and the consumer leg is verified
+  end to end on the cloud cluster.
+- **CockroachDB Cloud.** Serverless cluster on AWS us-east-1 (v26.2.1), all six
+  migrations applied, connected via the Managed MCP Server (read-only).
+
+Remaining (W6): seed at scale, the demo video, and this README's final polish.
+One AWS item waits on account age: the receiver's public function URL (the
+changefeed webhook target) is blocked by a new-account public-endpoint
+restriction, so the local outbox poll stays the eviction transport until it
+clears.
 
 ## Architecture
 
@@ -62,12 +76,12 @@ Recant is a set of independently runnable components, one per directory:
 | Component | Directory | Purpose | Status |
 |---|---|---|---|
 | attest-gateway | `services/attest_gateway/` | The only write path into memory: attested, hash-chained, signed belief writes | Built |
-| taint-engine | `services/taint_engine/` (planned) | Explicit closure via a recursive CTE over `derivations`; implicit closure via vector kNN within a contamination window | Not yet built, targeted Week 2 |
-| quarantine-service | `services/quarantine/` (planned) | Executes `recant(source_id)`: one serializable transaction that flips the full closure to quarantined and writes the incident | Not yet built, targeted Week 2 |
-| fanout | `fanout/` (planned, Lambda + EventBridge) | Changefeed webhook to eviction notices; demo agents evict caches and abort in-flight actions | Not yet built, targeted Week 3 |
-| forensics-api | `services/forensics/` (planned) | AS OF SYSTEM TIME queries, custody-chain reads, Bedrock-generated incident affidavits | Not yet built, targeted Week 4 |
-| fleet | `fleet/` (planned) | Three demo agents (researcher, support, ops) on LangChain with CockroachDB-backed memory | Not yet built, targeted Week 3 |
-| console | `console/` (planned) | Frontend, built under the `recant-frontend` skill | Not yet built, targeted Week 5 |
+| taint-engine | `services/taint_engine/` | Explicit closure via a recursive CTE over `derivations`; implicit closure via vector kNN within a contamination window | Built |
+| quarantine-service | `services/quarantine/` | Executes `recant(source_id)`: one serializable transaction that flips the full closure to quarantined and writes the attested incident | Built |
+| fanout | `fanout/` (Lambda + EventBridge) | Changefeed webhook to eviction notices; agents evict working memory and abort in-flight actions. Local outbox worker plus deployed cloud receiver and consumer Lambdas | Built (cloud webhook ingress pending account age) |
+| forensics-api | `services/forensics/` | AOST time travel, custody-chain and provenance reads, Bedrock Claude affidavits, S3 evidence archive | Built |
+| fleet | `fleet/` | Three demo agents (researcher, support, ops) on langchain-cockroachdb working memory | Built |
+| console | `console/` | Judge-facing UI built under the `recant-frontend` skill; deployed to Vercel | Built |
 
 ## Quickstart
 
@@ -94,53 +108,85 @@ every row from every table before each test, so running it against a seeded
 database wipes the seed data; reseed afterward (below) if you want data to
 inspect.
 
-Now start the gateway:
+Now start the three services (each in its own terminal, all with `DATABASE_URL`
+exported the same way):
 
 ```bash
-uv run uvicorn services.attest_gateway.app:app --port 8000
+uv run uvicorn services.attest_gateway.app:app --port 8000  # writes
+uv run uvicorn services.quarantine.app:app     --port 8001  # recant
+uv run uvicorn services.forensics.app:app      --port 8002  # reads
 ```
 
-In another terminal, with `DATABASE_URL` exported the same way:
+Seed the contamination story through the gateway:
 
 ```bash
 uv run python ops/seed/seed.py
 ```
 
-Expected output: `seeded 3 agents, 4 sources, 7 beliefs`.
+Expected output: `seeded 3 agents, 4 sources, 9 beliefs`.
 
-Then verify a chain, for example the `researcher` agent seeded above:
+Then recant the poisoned source and watch the closure flip, including the
+paraphrased copies that carry no explicit provenance edge:
 
 ```bash
-AGENT_ID=$(docker compose -f ops/chaos/docker-compose.yml exec -T roach1 \
-    ./cockroach sql --insecure --host=roach1:26257 -d recant --format=csv \
-    -e "SELECT agent_id FROM agents WHERE name = 'researcher'" | tail -n1)
-curl http://localhost:8000/agents/$AGENT_ID/chain/verify
+SRC=$(curl -s localhost:8002/board | python3 -c \
+  "import sys,json;print(next(s['source_id'] for s in json.load(sys.stdin)['sources'] if s['trust_tier']=='untrusted'))")
+curl -s -X POST localhost:8001/recant -H 'content-type: application/json' \
+  -d "{\"source_id\":\"$SRC\",\"actor\":\"operator\"}" | python3 -m json.tool
 ```
+
+### Run the console against the live backend
+
+By default the console (`console/`) runs on deterministic fixtures and needs no
+backend. To drive it from the live services, start the three above (with
+`RECANT_CORS_ORIGINS=http://localhost:5173` set) and run:
+
+```bash
+cd console && npm install
+VITE_FORENSICS_URL=http://localhost:8002 \
+VITE_QUARANTINE_URL=http://localhost:8001 \
+  npm run dev
+```
+
+Explore mode now reads the real board, the recant runs the real transaction,
+and the rewind is a real AOST query. Without the `VITE_*` vars it stays on
+fixtures (this is what the deployed demo URL serves).
+
+### Optional: Bedrock and the cloud fanout
+
+Set `RECANT_EMBEDDER=titan` and `RECANT_AFFIDAVIT=bedrock` (with AWS credentials
+in the environment) to use live Titan embeddings and Claude affidavits; both
+fall back cleanly without credentials. `RECANT_EVIDENCE_BUCKET` enables the S3
+archive endpoint. The cloud fanout Lambdas are packaged and deployed by
+`fanout/iac/package.sh` and `fanout/iac/deploy.sh`.
 
 ## CockroachDB tools
 
 | Tool | What the agent does with it | Status |
 |---|---|---|
-| CockroachDB Cloud Managed MCP Server | During development, connects for schema inspection and query-plan analysis, read-only. In the product, the Investigator agent answers forensic questions such as "is this belief clean, show its custody chain" through read-only MCP tool calls, fully audit-logged. | Blocked on U1 (cluster signup); connection steps recorded in `docs/mcp-setup.md`. |
-| Distributed Vector Indexing | `VECTOR(1024)` column on `beliefs` (`db/migrations/0001_schema.sql`) with a vector index (`db/migrations/0002_vector_index.sql`) for implicit taint tracing, finding paraphrased contamination with no explicit provenance edge, and similar-incident retrieval. | Confirmed Jul 2: `CREATE VECTOR INDEX` applies cleanly against the local `cockroachdb/cockroach:latest-v26.2` arm64 image. Support on CockroachDB Cloud Basic is unverified until U1 provides a live cluster. |
-| ccloud CLI | Drives cluster provisioning, service-account creation, and audit-log retrieval with `--json` output from scripts under `ops/`; the demo's ops agent runs a scripted health check on camera. | Blocked on U2 (CLI install and service account); targeted Week 3. |
-| CockroachDB Agent Skills repo | Schema design review and statement or performance profiling invoked against this repo, with before and after recorded in `docs/agent-skills-log.md`. | Pending, blocked on U1 (needs a live cluster); entries queued in `docs/agent-skills-log.md`. |
+| Distributed Vector Indexing | `VECTOR(1024)` column on `beliefs` with a cosine vector index (`db/migrations/0002`, rebuilt with `vector_cosine_ops` in `0004`) for implicit taint tracing: finding paraphrased contamination that carries no explicit provenance edge. An EXPLAIN assertion in the suite pins the `vector search` plan node. | Live. Applies on the local v26.2 image and on CockroachDB Cloud serverless v26.2.1. The recant materializes the vector-inferred edges. |
+| Serializable transactions | `recant(source_id)` computes and flips the entire contamination closure in one `SERIALIZABLE` transaction; a parked-transaction test proves the flip is all-or-nothing and invisible until commit. | Live. |
+| AS OF SYSTEM TIME | The forensics API answers "what did this agent believe at time T" as a time-travel read; the console rewind is backed by it. | Live. |
+| Changefeeds | `CREATE CHANGEFEED FOR TABLE memory_events INTO 'webhook-https://...'` drives the cloud eviction fanout. Accepted on the serverless free tier; the local transport is an outbox poll behind the same interface. | Deployed; changefeed creation waits on the receiver's public URL (account age). |
+| CockroachDB Cloud Managed MCP Server | Connected read-only for schema inspection and query-plan analysis during development; the same read-only surface backs the product's forensic questions. | Connected (per-session auth). |
+| ccloud CLI | Cluster provisioning and inspection with `--json` output. | Installed and authenticated. |
 
 ## AWS services
 
 | Service | What the agent does with it | Status |
 |---|---|---|
-| Amazon Bedrock | Titan Text Embeddings V2 (1024 dimensions) for belief embeddings; Claude for incident affidavits and apply or distinguish reasoning. | Not yet integrated; Week 1 stores an optional client-supplied embedding only, no fake embedder exists yet. A deterministic fake embedder arrives in Week 2 alongside the taint-engine tests. Blocked on U3 (AWS credentials). |
-| AWS Lambda | Consumes the changefeed webhook and fans out eviction notices to demo agents. | Not yet built; targeted Week 3, blocked on U3. |
-| Amazon S3 (Object Lock) | Immutable evidence archive for belief history beyond the CockroachDB GC window. | Not yet built; targeted Week 4, blocked on U3. |
-| Amazon EventBridge | Event bus between the changefeed Lambda and agent runtimes for cache eviction. | Not yet built; targeted Week 3, blocked on U3. |
+| Amazon Bedrock | Titan Text Embeddings V2 (1024 dimensions) for belief and working-memory embeddings; Claude (via a cross-region inference profile) writes incident affidavits from the stored records at temperature 0. | Live. Titan verified end to end (1024-dim, L2-normalized, threshold calibrated from a live probe); Claude affidavits generate live with a deterministic template fallback. Selected by `RECANT_EMBEDDER=titan` / `RECANT_AFFIDAVIT=bedrock`. |
+| AWS Lambda | Two functions: the receiver turns the changefeed webhook into EventBridge events; the consumer applies the eviction on the cloud cluster with the same handler the local worker uses. | Deployed. Consumer verified end to end (applies in 27ms, duplicates no-op through the delivery ledger). |
+| Amazon EventBridge | Event bus and rule between the receiver and consumer Lambdas. | Deployed; the receiver-to-bus-to-consumer chain ran hands-free. |
+| Amazon S3 | Versioned, private evidence archive: `POST /incidents/{id}/archive` writes the incident summary, affidavit, and per-agent custody chains under one prefix. | Live. Bucket versioned with all public access blocked; verified end to end. |
 
 ## Failure modes
 
 | Failure mode | Handling |
 |---|---|
-| Changefeed unavailable on the CockroachDB tier | Fallback designed, not yet built: poll the `memory_events` outbox table behind the same `EvictionBus` interface, so calling code would not change. Targeted Week 3 alongside fanout. See `docs/spike-changefeeds.md`. |
-| KMS unavailable in development | A deterministic Ed25519 dev signer derives keys from the agent name and is clearly labeled as a dev signer; production replaces it with an AWS KMS signer behind the same `Signer` interface (Week 4). |
+| Changefeed unavailable, or its webhook target unreachable | The `memory_events` outbox is polled by a local worker behind the same interface (an anti-join against a durable delivery ledger, immune to timestamp-cursor skip), so eviction is delayed, never lost. The cloud webhook changefeed replaces only the poll loop. This is the active transport today while the receiver's public URL waits on account age. |
+| Bedrock unavailable or credentials absent | Titan selection is opt-in (`RECANT_EMBEDDER`); the deterministic HashEmbedder is the default. The Claude affidavit generator falls back to the deterministic text template on any error, and the fallback is visible in the response and the log. |
+| KMS unavailable in development | A deterministic Ed25519 dev signer derives keys from the agent name and is clearly labeled as a dev signer; production replaces it with an AWS KMS signer behind the same `Signer` interface. |
 | Node loss | The local chaos cluster runs 3 CockroachDB nodes; the cluster and in-flight forensics queries survive the loss of 1 node. |
 | Serialization conflicts | Writes that hit SQLSTATE 40001 are retried with jitter (`services/common/db.py`) instead of surfaced to the caller. |
 
