@@ -15,9 +15,11 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-import psycopg
+if TYPE_CHECKING:  # psycopg is annotation-only here: parse_event needs no DB,
+    import psycopg  # so the receiver Lambda zip ships without the driver.
 
 AGENT_MEMORY_TABLE = "agent_memory"
 

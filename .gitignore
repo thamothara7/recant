@@ -24,3 +24,4 @@ console/vite.config.d.ts
 .vercel
 .env*
 !.env.example
+fanout/iac/build/
