@@ -1,330 +1,417 @@
 # Recant
 
-"Recant: when an agent's memory goes bad, take it back. Everywhere. Provably."
+Recant is a provenance and retraction substrate for shared agent memory. It
+records who wrote each belief, where it came from, and its signed hash-chain
+position. When a source is found to be unsafe, `recant(source_id)` quarantines
+the full contamination closure: direct citations, explicit descendants, and
+semantically similar copies that have no recorded edge. A durable outbox then
+evicts those beliefs from agent working memory and aborts pending actions based
+on them.
 
-An agent fleet shares memory. One poisoned source, a stale vendor page, a forum
-post, gets ingested by one agent, then paraphrased into a second agent's
-beliefs with no explicit link back to the source. By the time anyone notices,
-the bad fact has spread through the fleet, and an ops agent is about to act on
-it.
+It is not a chatbot or a RAG application. It is the custody and incident
+response layer beneath an agent-memory system.
 
-Recant is chain of custody for machine memory. Every belief an agent stores
-carries a signed, provenance-linked custody record: which agent wrote it, what
-source it came from, and a hash chain back to every prior belief that agent
-has ever written. When a source turns out to be poisoned, one call,
-`recant(source_id)`, quarantines every belief derived from it across the whole
-fleet in a single serializable transaction, including beliefs that only match
-semantically and carry no explicit provenance edge. A changefeed evicts the
-belief from any agent about to act on it, and a forensic query can prove
-exactly what any agent believed at any point in the past.
+The deployed console is a deterministic fixture demo: [recant.vercel.app](https://recant.vercel.app).
+It does not need a backend. The repository also contains the complete local
+CockroachDB, FastAPI, fleet, and fanout workflow described below.
 
-Memory poisoning is the successor to prompt injection: once agents remember
-and share what they learn, one bad source becomes a fleet-wide liability.
-Recant is not a RAG app, not a chatbot, and not a memory layer. It is the
-provenance and retraction substrate underneath memory layers, the same role
-Sigstore and SLSA play for the software supply chain.
+## What is in the repository
 
-Live console (deterministic demo, no backend needed): https://recant.vercel.app
+| Component | Location | Responsibility |
+| --- | --- | --- |
+| Attest gateway | `services/attest_gateway/` | Only supported write path. Creates agents and sources, attests beliefs, and maintains each agent's signed hash chain. |
+| Quarantine service | `services/quarantine/` | Previews and executes `recant(source_id)` in a serializable transaction. |
+| Forensics API | `services/forensics/` | Read-only board, provenance, custody-chain, incident, evidence, and time-travel queries. |
+| Taint engine | `services/taint_engine/` | Traverses explicit derivations and vector similarity matches. |
+| Fanout | `fanout/` | Local durable outbox worker and AWS Lambda/EventBridge implementation for eviction. |
+| Demo fleet | `fleet/` | Three deterministic agents with CockroachDB-backed working memory. |
+| Web console | `console/` | Vite/React UI. It uses fixtures unless live API URLs are configured. |
+| Database | `db/migrations/` | Ordered CockroachDB schema migrations. |
 
-## Status
+## Prerequisites
 
-The full contamination-to-recant-to-proof path works end to end. 150 tests
-green against the live local 3-node cluster.
+For the full local stack, install:
 
-- **Attested writes (attest-gateway).** The only write path into memory. Every
-  belief write runs in one serializable transaction that reads the agent's
-  chain head `FOR UPDATE`, hash-chains and Ed25519-signs the payload, and
-  advances the head; writes retry on SQLSTATE 40001 with jitter. A direct
-  `UPDATE` that bypasses the gateway is caught by chain and signature
-  verification (regression-tested).
-- **Taint engine + recant.** `recant(source_id)` runs one serializable
-  transaction that computes the full contamination closure, explicit edges via
-  a recursive CTE over `derivations` plus vector kNN for paraphrased copies
-  that carry no provenance edge, flips it all to quarantined, opens the
-  incident, and writes an attested, self-verifying quarantine action.
-- **Fleet + eviction.** Three agents (researcher, support, ops) on
-  langchain-cockroachdb working memory. An outbox worker fans the recant out to
-  running agents: it deletes evicted beliefs from working memory and aborts
-  pending actions resting on them, exactly-once per consumer via a durable
-  delivery ledger.
-- **Forensics API.** AS OF SYSTEM TIME belief history (time travel), custody
-  chain and single-belief provenance with live chain + signature verification,
-  incident summaries that re-verify each quarantine action from stored rows,
-  Bedrock Claude affidavits (with a deterministic template fallback), and an S3
-  evidence-bundle archive. Tamper is proven detected, not just assumed.
-- **Console.** The judge-facing UI (`console/`, Material 3, deployed to Vercel).
-  Story mode is a scripted walkthrough; Explore drives the live backend when
-  configured (real board, real recant, real time-travel), and falls back to
-  deterministic fixtures otherwise.
-- **AWS, live.** Bedrock Titan Text Embeddings V2 (verified 1024-dim, threshold
-  calibrated) and Claude affidavits; S3 evidence archive; the changefeed to
-  Lambda to EventBridge fanout is deployed and the consumer leg is verified
-  end to end on the cloud cluster.
-- **CockroachDB Cloud.** Serverless cluster on AWS us-east-1 (v26.2.1), all six
-  migrations applied, connected via the Managed MCP Server (read-only).
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with the Compose plugin. It runs the local three-node CockroachDB cluster.
+- [uv](https://docs.astral.sh/uv/), which provisions the project Python version and dependencies. You do not need a separate Python installation.
+- Node.js 20+ and npm, only for the console.
+- Git.
 
-Remaining (W6): seed at scale, the demo video, and this README's final polish.
-One AWS item waits on account age: the receiver's public function URL (the
-changefeed webhook target) is blocked by a new-account public-endpoint
-restriction, so the local outbox poll stays the eviction transport until it
-clears.
-
-## Architecture
-
-Recant is a set of independently runnable components, one per directory:
-
-| Component | Directory | Purpose | Status |
-|---|---|---|---|
-| attest-gateway | `services/attest_gateway/` | The only write path into memory: attested, hash-chained, signed belief writes | Built |
-| taint-engine | `services/taint_engine/` | Explicit closure via a recursive CTE over `derivations`; implicit closure via vector kNN within a contamination window | Built |
-| quarantine-service | `services/quarantine/` | Executes `recant(source_id)`: one serializable transaction that flips the full closure to quarantined and writes the attested incident | Built |
-| fanout | `fanout/` (Lambda + EventBridge) | Changefeed webhook to eviction notices; agents evict working memory and abort in-flight actions. Local outbox worker plus deployed cloud receiver and consumer Lambdas | Built (cloud webhook ingress pending account age) |
-| forensics-api | `services/forensics/` | AOST time travel, custody-chain and provenance reads, Bedrock Claude affidavits, S3 evidence archive | Built |
-| fleet | `fleet/` | Three demo agents (researcher, support, ops) on langchain-cockroachdb working memory | Built |
-| console | `console/` | Judge-facing UI built under the `recant-frontend` skill; deployed to Vercel | Built |
-
-## Setup (macOS, Windows, Linux)
-
-New to this stack? You need three tools: Docker, uv, and (only for the web
-console) Node. You do NOT install Python yourself: **uv downloads and manages a
-Python 3.12 for this project automatically**, so on every OS you just run
-`uv run python ...` and never pick an interpreter. (On macOS the system command
-would be `python3`, but you will not need it.)
-
-### 1. Install the tools
-
-macOS (using [Homebrew](https://brew.sh)):
+On macOS, one possible installation is:
 
 ```bash
-brew install --cask docker    # Docker Desktop (or download it from docker.com)
-brew install uv node          # uv manages Python; node is only for the console
+brew install --cask docker
+brew install uv node git
 ```
 
-Windows (PowerShell):
+On Windows, install Docker Desktop, uv, Node.js, and Git, then run the shell
+commands in **WSL2**. The operational scripts are Bash scripts. Enable Docker
+Desktop's WSL integration and confirm `docker info` works in that WSL terminal
+before continuing.
 
-```powershell
-winget install Docker.DockerDesktop
-winget install astral-sh.uv
-winget install OpenJS.NodeJS
-```
+The database URLs in this README use the local, insecure, loopback-only
+development cluster. Do not reuse them for a remote or production database.
 
-**Windows, important:** the setup scripts (`ops/chaos/init.sh`,
-`ops/run-services.sh`) are bash. Run every command below inside **WSL2**
-(recommended) or **Git Bash**, not PowerShell or cmd, so the scripts and
-`export` lines work exactly as written.
+## Fastest path: run only the console
 
-Linux (Debian/Ubuntu):
+This is the quickest way to view the product. It uses deterministic fixture
+data and requires neither Docker nor Python services.
 
 ```bash
-# Docker Engine: follow https://docs.docker.com/engine/install
-curl -LsSf https://astral.sh/uv/install.sh | sh
-sudo apt install -y nodejs npm git
+git clone https://github.com/thamothara7/recant.git
+cd recant/console
+npm ci
+npm run dev
 ```
 
-Start Docker Desktop (macOS/Windows) and wait until it reports "running", or
-start the Docker service (Linux), before continuing.
+Open <http://localhost:5173>. Press `Ctrl+C` to stop Vite.
 
-### 2. Get the code
+## Full local setup
+
+These steps create a disposable local cluster, install dependencies, apply the
+schema, test it, run the services, and seed the deterministic incident story.
+All commands below are run from the repository root unless a command changes
+directory explicitly.
+
+### 1. Clone and create local configuration
 
 ```bash
 git clone https://github.com/thamothara7/recant.git
 cd recant
-uv sync    # provisions Python 3.12 and every dependency; no manual Python needed
+cp .env.example .env
+uv sync
 ```
 
-### 3. Start the database and apply the schema
+`.env` is ignored by Git. The example defaults are safe for the local Docker
+cluster. To make them available to one shell, run:
 
 ```bash
-bash ops/chaos/init.sh
-export DATABASE_URL=postgresql://root@localhost:26257/recant?sslmode=disable
-uv run python -m db.migrate
+set -a
+. ./.env
+set +a
 ```
 
-On Windows PowerShell (if you are not using WSL2 or Git Bash), set the variable
-with `$env:DATABASE_URL="postgresql://root@localhost:26257/recant?sslmode=disable"`
-instead of `export`.
+`ops/run-services.sh` loads `.env` itself. Commands such as migrations, tests,
+the worker, and the fleet need the variables exported as above.
 
-### 4. Run the tests
+### 2. Start CockroachDB and apply migrations
+
+Start Docker Desktop or Docker Engine first, then verify that the current shell
+can reach it:
+
+```bash
+docker info
+bash ops/chaos/init.sh
+uv run python -m db.migrate
+docker compose -f ops/chaos/docker-compose.yml ps
+```
+
+The command prints this local connection string when the cluster is ready:
+
+```text
+postgresql://root@localhost:26257/recant?sslmode=disable
+```
+
+The CockroachDB admin UI is available at <http://localhost:8080>. The database
+ports are deliberately bound to loopback addresses only.
+
+### 3. Run tests before seeding
 
 ```bash
 uv run pytest
+cd console && npm ci && npm run build && cd ..
 ```
 
-Unit tests always run; integration tests run only when `DATABASE_URL` is set
-(otherwise they skip). The integration suite deletes every row before each
-test, so running it wipes seed data; reseed afterward (step 5) if you want data
-to inspect. **Stop the services (step 5) before running the integration suite**
-so it has the cluster to itself.
+`pytest` runs unit and integration tests when `DATABASE_URL` is exported. The
+integration fixtures delete rows before every test, so stop local services and
+do not point this command at a database containing data you want to keep.
 
-If the suite starts failing with serialization errors or `unknown agent` 404s,
-the local cluster is throttled: an unlicensed multi-node CockroachDB cluster
-caps at 5 concurrent transactions after a 7-day grace period. Reset it (this
-destroys local data and starts a fresh grace period), then reseed:
+To run only the database-free unit suite:
 
 ```bash
-bash ops/chaos/reset.sh
+env -u DATABASE_URL uv run pytest tests/unit
 ```
 
-### 5. Start the services and seed the demo
+### 4. Run the services and the local eviction worker
 
-The launcher starts all three services in one terminal and stops them together
-on Ctrl+C (it loads `.env` itself, so `DATABASE_URL` is already handled):
+Open two terminals at the repository root.
+
+Terminal 1 starts the HTTP services and reads `.env` automatically:
 
 ```bash
 bash ops/run-services.sh
 ```
 
-Gateway on :8000 (writes), quarantine on :8001 (recant), forensics on :8002
-(reads). To run them by hand instead, start each in its own terminal:
-`uv run uvicorn services.attest_gateway.app:app --port 8000`, then the
-`services.quarantine.app` and `services.forensics.app` apps on 8001 and 8002.
+| Service | URL | Interactive API documentation |
+| --- | --- | --- |
+| Attest gateway | <http://localhost:8000> | <http://localhost:8000/docs> |
+| Quarantine service | <http://localhost:8001> | <http://localhost:8001/docs> |
+| Forensics API | <http://localhost:8002> | <http://localhost:8002/docs> |
 
-The launcher keeps running, so open a **second terminal** (in the same `recant`
-folder) and seed the contamination story through the gateway:
+Terminal 2 runs the durable local outbox consumer. It is required to observe
+working-memory eviction and action abortion after a recant:
 
 ```bash
+set -a
+. ./.env
+set +a
+uv run python -m fanout.worker --consumer local-evictor
+```
+
+Verify the stack from a third terminal:
+
+```bash
+curl -fsS http://localhost:8000/healthz
+curl -fsS http://localhost:8001/healthz
+curl -fsS http://localhost:8002/healthz
+```
+
+Each should return `{"status":"ok"}`.
+
+### 5. Seed and exercise the incident flow
+
+With the gateway running, seed the fixed contamination scenario:
+
+```bash
+set -a
+. ./.env
+set +a
 uv run python ops/seed/seed.py
 ```
 
-Expected output: `seeded 3 agents, 4 sources, 9 beliefs`.
+Expected output is `seeded 3 agents, 4 sources, 9 beliefs`. The seed command
+intentionally fails if data already exists; this preserves a deterministic
+demo rather than silently upserting a second copy.
 
-Then recant the poisoned source and watch the closure flip, including the
-paraphrased copies that carry no explicit provenance edge:
+Preview and then recant the untrusted source:
 
 ```bash
-SRC=$(curl -s localhost:8002/board | python3 -c \
-  "import sys,json;print(next(s['source_id'] for s in json.load(sys.stdin)['sources'] if s['trust_tier']=='untrusted'))")
-curl -s -X POST localhost:8001/recant -H 'content-type: application/json' \
-  -d "{\"source_id\":\"$SRC\",\"actor\":\"operator\"}" | python3 -m json.tool
+source_id="$(curl -fsS http://localhost:8002/board | uv run python -c '
+import json, sys
+print(next(s["source_id"] for s in json.load(sys.stdin)["sources"] if s["trust_tier"] == "untrusted"))
+')"
+
+curl -fsS -X POST http://localhost:8001/taint/preview \
+  -H 'content-type: application/json' \
+  -d "{\"source_id\":\"$source_id\"}" | uv run python -m json.tool
+
+curl -fsS -X POST http://localhost:8001/recant \
+  -H 'content-type: application/json' \
+  -d "{\"source_id\":\"$source_id\",\"actor\":\"local-operator\"}" | uv run python -m json.tool
 ```
 
-### Run the console against the live backend
-
-By default the console (`console/`) runs on deterministic fixtures and needs no
-backend. To drive it from the live services, start the three above (with
-`RECANT_CORS_ORIGINS=http://localhost:5173` set) and run:
+The receipt lists the incident ID, every belief in the closure, and the newly
+quarantined beliefs. The running worker consumes the resulting `memory_events`
+row. Inspect the live graph with:
 
 ```bash
-cd console && npm install
+curl -fsS http://localhost:8002/board | uv run python -m json.tool
+```
+
+### 6. Connect the console to the local services
+
+The console defaults to fixtures. Give Vite both URLs to enable live Explore
+mode and live recant requests:
+
+```bash
+cd console
+npm ci
 VITE_FORENSICS_URL=http://localhost:8002 \
 VITE_QUARANTINE_URL=http://localhost:8001 \
   npm run dev
 ```
 
-Explore mode now reads the real board, the recant runs the real transaction,
-and the rewind is a real AOST query. Without the `VITE_*` vars it stays on
-fixtures (this is what the deployed demo URL serves).
+Open <http://localhost:5173>. These are build-time Vite variables: stop and
+restart `npm run dev` after changing them. The frontend must be served from an
+origin listed in `RECANT_CORS_ORIGINS` (the local default is
+`http://localhost:5173`).
 
-### Optional: Bedrock and the cloud fanout
+## Everyday commands
 
-Set `RECANT_EMBEDDER=titan` and `RECANT_AFFIDAVIT=bedrock` (with AWS credentials
-in the environment) to use live Titan embeddings and Claude affidavits; both
-fall back cleanly without credentials. `RECANT_EVIDENCE_BUCKET` enables the S3
-archive endpoint. The cloud fanout Lambdas are packaged and deployed by
-`fanout/iac/package.sh` and `fanout/iac/deploy.sh`.
+| Goal | Command | Notes |
+| --- | --- | --- |
+| Start database | `bash ops/chaos/init.sh` | Idempotent; needs Docker. |
+| Apply schema | `uv run python -m db.migrate` | Requires exported `DATABASE_URL`. |
+| Start APIs | `bash ops/run-services.sh` | Gateway `:8000`, quarantine `:8001`, forensics `:8002`. |
+| Run local fanout | `uv run python -m fanout.worker --consumer local-evictor` | Uses a durable delivery ledger. Add `--once` to drain and exit. |
+| Seed basic story | `uv run python ops/seed/seed.py` | Requires a clean database and gateway. |
+| Run agent-memory demo | `uv run python -m fleet.run --ticks 4` | Requires a clean database, gateway, and exported environment. |
+| Inspect fleet working memory | `uv run python -m fleet.show --agent ops` | Run after the fleet demo. |
+| Run all tests | `uv run pytest` | Integration tests clear database rows. |
+| Run console | `cd console && npm run dev` | Fixtures unless `VITE_*` URLs are set. |
+| Build console | `cd console && npm ci && npm run build` | Produces ignored `console/dist/`. |
+| Configure 24-hour local AOST retention | `bash ops/chaos/configure-gc.sh` | Local cluster only. |
 
-### Scale
+## API map
 
-`ops/scale_test.py` builds a large fleet and a deep contamination tree, then
-proves one recant flips exactly the contaminated closure in a single
-serializable transaction and leaves every clean belief untouched. Measured on
-the local 3-node cluster: a 300-belief closure across 20 agents flips in 269ms,
-and an 800-belief closure across 40 agents (2000 beliefs total) in 776ms, both
-idempotent on a repeat recant. The flip is roughly linear in closure size and
-stays sub-second.
+The FastAPI `/docs` pages are the source of truth for request and response
+schemas. The most-used endpoints are:
 
-```bash
-export DATABASE_URL=postgresql://root@localhost:26257/recant?sslmode=disable
-SCALE_AGENTS=40 SCALE_TAINTED=800 SCALE_NOISE=1200 uv run python ops/scale_test.py
-```
+| Service | Endpoint | Purpose |
+| --- | --- | --- |
+| Gateway | `POST /agents`, `POST /sources` | Register custody principals and input sources. |
+| Gateway | `POST /beliefs` | Attested belief write. Optional `source_id`, `parent_ids`, and 1024-float `embedding`. |
+| Gateway | `GET /agents/{agent_id}/chain/verify` | Verify a complete agent hash/signature chain. |
+| Quarantine | `POST /taint/preview` | Read-only contamination closure preview. |
+| Quarantine | `POST /recant` | Open an incident and quarantine the closure. |
+| Forensics | `GET /board` | Live agents, sources, beliefs, and derivation graph. |
+| Forensics | `GET /beliefs/{belief_id}/provenance` | Source, parent/child edges, and verification state. |
+| Forensics | `GET /agents/{agent_id}/beliefs?as_of=<ISO-8601>` | CockroachDB time-travel view. |
+| Forensics | `GET /agents/{agent_id}/custody-chain` | Full verified custody chain. |
+| Forensics | `GET /incidents/{incident_id}` | Incident summary and signed actions. |
+| Forensics | `GET /incidents/{incident_id}/affidavit` | Template or Bedrock-generated incident affidavit. |
 
-## Integrating your agents
+Every service exposes `GET /healthz`. Use it before debugging an application
+request; it tests the application-to-database connection.
 
-Recant is a memory substrate your agents write through and query, not an app you
-log into. The whole integration is one endpoint swap: write every belief through
-the gateway instead of a raw vector store, and call `recant` when a source turns
-out to be poisoned. Custody, hash-chaining, and the signature happen server-side;
-your agents read memory back exactly as they would from any store.
+## Integrating an agent
 
-`recant_client.py` (standard library plus httpx) is a thin client over the three
-services:
+Use the gateway for every memory write rather than writing straight to the
+vector table. `recant_client.py` is a small HTTP client with no framework
+dependency beyond `httpx`:
 
 ```python
 from recant_client import RecantClient
 
-rc = RecantClient()  # defaults to the three local services
+with RecantClient() as recant:
+    agent_id = recant.register_agent("support-bot", region="us-east")
+    trusted = recant.register_source(
+        "https://vendor.example/refund-policy", "verified"
+    )
+    unsafe = recant.register_source(
+        "https://forum.example/thread/42", "untrusted"
+    )
 
-# Provision once
-agent  = rc.register_agent("support-bot", region="us-east")
-good   = rc.register_source("https://vendor.com/refund-policy", "verified")
-bad    = rc.register_source("https://forum.example.com/thread/42", "untrusted")
+    recant.remember(agent_id, "Refunds are available for 30 days.", source_id=trusted)
+    bad_belief = recant.remember(
+        agent_id, "Refunds can be extended to a year.", source_id=unsafe
+    )
+    recant.remember(
+        agent_id,
+        "Approve a 365-day refund.",
+        parent_ids=[bad_belief],
+    )
 
-# Write memory through the gateway (this is the only change to your agents).
-# source_id gives provenance to a source; parent_ids to earlier beliefs.
-# Omit the embedding and Recant makes one; pass 1024 floats to supply your own.
-rc.remember(agent, "The refund window is 30 days.", source_id=good)
-bad_belief = rc.remember(agent, "Actually the refund window is 365 days.", source_id=bad)
-rc.remember(agent, "Refunds can be extended to a full year.", parent_ids=[bad_belief])
-
-# ... later, the source is found poisoned ...
-rc.preview(bad)             # read-only: what a recant WOULD flip
-incident = rc.recant(bad)   # revokes it everywhere, provably, in one transaction
-print(rc.affidavit(incident["incident_id"]))
+    preview = recant.preview(unsafe)       # no mutation
+    incident = recant.recant(unsafe)       # quarantines full closure
+    proof = recant.incident(incident["incident_id"])
 ```
 
-The clean belief still verifies after the recant; the bad belief and everything
-derived from it (explicit edges and vector-inferred paraphrases alike) are
-quarantined, and any in-flight action resting on them is aborted. Reads for
-proof: `verify_chain`, `provenance`, `custody_chain`, `incident`, `beliefs_at`
-(AS OF SYSTEM TIME time travel), and `archive` (evidence to S3).
+The client accepts alternate service base URLs in its constructor. Supplying
+your own embedding requires exactly 1024 floats; otherwise the configured
+embedder generates one. In production, replace the deterministic development
+signer before setting `RECANT_ENV=production`: the development signer refuses
+to issue signatures in that mode.
 
-Not a Python shop? Every method is a plain HTTP call; the raw equivalents:
+## Tests and a practical bug-fixing workflow
+
+There is no configured lint or formatter command. The repeatable quality gates
+are the Python test suite and the TypeScript/Vite production build.
+
+1. Reproduce the issue with the smallest test or API request possible.
+2. Add or update a focused test under `tests/unit/` when no database is
+   needed; use `tests/integration/` for CockroachDB behavior.
+3. Run the focused test, then the appropriate full suite:
+
+   ```bash
+   uv run pytest tests/unit
+   uv run pytest tests/integration
+   cd console && npm run build
+   ```
+
+4. For a behavior that crosses a service boundary, use the deterministic seed,
+   call `/taint/preview` before `/recant`, and inspect `/board` plus the worker
+   output afterward.
+5. Before committing, check that generated local files were not staged:
+
+   ```bash
+   git status --short
+   git diff --check
+   ```
+
+The integration suite owns its database state: it calls migrations and deletes
+rows before each test. Stop `ops/run-services.sh`, the fanout worker, and the
+fleet before running it. Never point it at a cloud or shared environment.
+
+## Troubleshooting
+
+| Symptom | Cause and resolution |
+| --- | --- |
+| `failed to connect to the docker API` | Docker Desktop/Engine is stopped or WSL cannot access it. Start Docker Desktop, enable WSL integration if applicable, run `docker info`, then rerun `bash ops/chaos/init.sh`. |
+| Cluster does not become ready | Inspect `docker compose -f ops/chaos/docker-compose.yml logs roach1`. Confirm ports 26257 and 8080 are free, then rerun the init script. |
+| `DATABASE_URL` is missing | Run `set -a; . ./.env; set +a` in the current shell. Only `ops/run-services.sh` loads `.env` automatically. |
+| Migration fails because the database is unreachable | Start the cluster first. Confirm with `docker compose -f ops/chaos/docker-compose.yml ps`, then re-run `uv run python -m db.migrate`; migrations are tracked and safe to repeat. |
+| Service launcher says ports 8000, 8001, or 8002 are busy | Identify the process with `lsof -nP -iTCP:8000 -sTCP:LISTEN` (repeat for the other ports), stop that specific process, and restart the launcher. |
+| Seeder says `already seeded` | This is expected on a non-empty demo database. Keep the data and skip seeding, or reset the **local** cluster with `bash ops/chaos/reset.sh`; reset destroys its Docker volumes and data. |
+| Integration test fails with `40001`, `WriteTooOld`, or unexpected `unknown agent` errors | Stop APIs/workers, then run `bash ops/chaos/reset.sh`. The local unlicensed multi-node CockroachDB setup can throttle concurrency after its grace period; reset is destructive but restores a clean local cluster. |
+| A recant changes belief statuses but working memory/action state does not change | Start `fanout.worker` with the same exported `DATABASE_URL`. To process existing events once, run `uv run python -m fanout.worker --consumer local-evictor --once`. |
+| Console still shows fixtures | Set both `VITE_FORENSICS_URL` and `VITE_QUARANTINE_URL`, then restart Vite. Confirm the APIs' `/healthz` endpoints work and that `RECANT_CORS_ORIGINS` exactly includes the browser origin. |
+| Browser reports a CORS error | Set `RECANT_CORS_ORIGINS` to a comma-separated list of exact origins, for example `http://localhost:5173,http://127.0.0.1:5173`, and restart the affected API services. |
+| `npm ci` or `npm run build` fails | Check `node --version`, remove only `console/node_modules`, then rerun `npm ci`. Do not commit `node_modules` or `console/dist`. |
+| Bedrock, S3 archive, or cloud fanout call fails locally | These are optional. Leave `RECANT_EMBEDDER=hash` and the default affidavit template for a fully local run. Cloud features require AWS credentials, a region, Bedrock model access, and their feature-specific configuration. |
+| `RECANT_ENV=production` causes signer errors | Expected: the deterministic development signer is intentionally blocked in production mode. Configure a production signer before using that setting. |
+
+## Optional features
+
+### Fleet eviction demonstration
+
+Use a clean local database, with the API launcher and worker already running:
 
 ```bash
-curl -s localhost:8000/agents  -d '{"name":"support-bot","region":"us-east"}'
-curl -s localhost:8000/sources -d '{"kind":"web","uri":"https://forum.example.com/42","trust_tier":"untrusted"}'
-curl -s localhost:8000/beliefs -d '{"agent_id":"<agent>","content":"...","source_id":"<source>"}'
-curl -s localhost:8001/recant  -d '{"source_id":"<bad>","actor":"oncall"}'
+set -a
+. ./.env
+set +a
+uv run python -m fleet.run --ticks 4
+uv run python -m fleet.show --agent ops
 ```
 
-## CockroachDB tools
+Recant the untrusted source as shown in the quickstart, wait for the worker,
+then rerun `fleet.show`. The contaminated working-memory entries disappear and
+the pending refund action is aborted. The fleet runner fails rather than
+upserting if custody data already exists; reset the local cluster first when
+you want a fresh replay.
 
-| Tool | What the agent does with it | Status |
-|---|---|---|
-| Distributed Vector Indexing | `VECTOR(1024)` column on `beliefs` with a cosine vector index (`db/migrations/0002`, rebuilt with `vector_cosine_ops` in `0004`) for implicit taint tracing: finding paraphrased contamination that carries no explicit provenance edge. An EXPLAIN assertion in the suite pins the `vector search` plan node. | Live. Applies on the local v26.2 image and on CockroachDB Cloud serverless v26.2.1. The recant materializes the vector-inferred edges. |
-| Serializable transactions | `recant(source_id)` computes and flips the entire contamination closure in one `SERIALIZABLE` transaction; a parked-transaction test proves the flip is all-or-nothing and invisible until commit. | Live. |
-| AS OF SYSTEM TIME | The forensics API answers "what did this agent believe at time T" as a time-travel read; the console rewind is backed by it. | Live. |
-| Changefeeds | `CREATE CHANGEFEED FOR TABLE memory_events INTO 'webhook-https://...'` drives the cloud eviction fanout. Accepted on the serverless free tier; the local transport is an outbox poll behind the same interface. | Deployed; changefeed creation waits on the receiver's public URL (account age). |
-| CockroachDB Cloud Managed MCP Server | Connected read-only for schema inspection and query-plan analysis during development; the same read-only surface backs the product's forensic questions. | Connected (per-session auth). |
-| ccloud CLI | Cluster provisioning and inspection with `--json` output. | Installed and authenticated. |
+### Scale test
 
-## AWS services
+`ops/scale_test.py` deletes all rows before creating its workload. Its own
+guard only permits a `localhost` or `127.0.0.1` URL; still verify the target
+before running it:
 
-| Service | What the agent does with it | Status |
-|---|---|---|
-| Amazon Bedrock | Titan Text Embeddings V2 (1024 dimensions) for belief and working-memory embeddings; Claude (via a cross-region inference profile) writes incident affidavits from the stored records at temperature 0. | Live. Titan verified end to end (1024-dim, L2-normalized, threshold calibrated from a live probe); Claude affidavits generate live with a deterministic template fallback. Selected by `RECANT_EMBEDDER=titan` / `RECANT_AFFIDAVIT=bedrock`. |
-| AWS Lambda | Two functions: the receiver turns the changefeed webhook into EventBridge events; the consumer applies the eviction on the cloud cluster with the same handler the local worker uses. | Deployed. Consumer verified end to end (applies in 27ms, duplicates no-op through the delivery ledger). |
-| Amazon EventBridge | Event bus and rule between the receiver and consumer Lambdas. | Deployed; the receiver-to-bus-to-consumer chain ran hands-free. |
-| Amazon S3 | Versioned, private evidence archive: `POST /incidents/{id}/archive` writes the incident summary, affidavit, and per-agent custody chains under one prefix. | Live. Bucket versioned with all public access blocked; verified end to end. |
+```bash
+set -a
+. ./.env
+set +a
+SCALE_AGENTS=40 SCALE_TAINTED=800 SCALE_NOISE=1200 \
+  uv run python ops/scale_test.py
+```
 
-## Failure modes
+### AWS integrations
 
-| Failure mode | Handling |
-|---|---|
-| Changefeed unavailable, or its webhook target unreachable | The `memory_events` outbox is polled by a local worker behind the same interface (an anti-join against a durable delivery ledger, immune to timestamp-cursor skip), so eviction is delayed, never lost. The cloud webhook changefeed replaces only the poll loop. This is the active transport today while the receiver's public URL waits on account age. |
-| Bedrock unavailable or credentials absent | Titan selection is opt-in (`RECANT_EMBEDDER`); the deterministic HashEmbedder is the default. The Claude affidavit generator falls back to the deterministic text template on any error, and the fallback is visible in the response and the log. |
-| KMS unavailable in development | A deterministic Ed25519 dev signer derives keys from the agent name and is clearly labeled as a dev signer; production replaces it with an AWS KMS signer behind the same `Signer` interface. |
-| Node loss | The local chaos cluster runs 3 CockroachDB nodes; the cluster and in-flight forensics queries survive the loss of 1 node. |
-| Serialization conflicts | Writes that hit SQLSTATE 40001 are retried with jitter (`services/common/db.py`) instead of surfaced to the caller. |
+The default local mode uses deterministic hash embeddings and a deterministic
+affidavit template. Optional cloud settings are:
 
-## Cost estimate
+| Setting | Effect | Requirements |
+| --- | --- | --- |
+| `RECANT_EMBEDDER=titan` | Amazon Titan Text Embeddings V2 | AWS credentials, Bedrock access, 1024-dimensional model. |
+| `RECANT_AFFIDAVIT=bedrock` | Claude-generated incident affidavit | AWS credentials and Bedrock model access. Falls back to a template on runtime failure. |
+| `RECANT_EVIDENCE_BUCKET=<bucket>` | Enables `POST /incidents/{id}/archive` | AWS credentials and write access to the named S3 bucket. |
+| `fanout/iac/package.sh` / `deploy.sh` | Packages and deploys Lambda/EventBridge fanout | AWS CLI, cloud database URL in local `.env`, and CockroachDB Cloud CA certificate. |
 
-- CockroachDB Cloud Basic: free tier (50 million request units and 10 GiB
-  storage per month) covers the primary cluster.
-- ECS Fargate: one 0.25 vCPU task running the attest-gateway continuously
-  costs roughly 9 to 12 USD per month.
-- AWS Lambda, EventBridge, and S3: expected to stay within the AWS Free Tier
-  at demo scale, given the low request volume and small evidence archive.
-- Amazon Bedrock: Titan embeddings and Claude calls are billed per token; at
-  demo scale (dozens of beliefs, a handful of affidavits) this comes to
-  pennies.
+Read [docs/mcp-setup.md](docs/mcp-setup.md) for CockroachDB Cloud MCP notes,
+[docs/demo-script.md](docs/demo-script.md) for the presentation flow, and
+[docs/plan.md](docs/plan.md) for implementation decisions and historical
+status. Keep cloud credentials and `DATABASE_URL_CLOUD` in the ignored `.env`
+file, never in source control.
+
+## Safety notes
+
+- `ops/chaos/reset.sh` destroys the local CockroachDB Docker volumes.
+- Integration tests and `ops/scale_test.py` delete local database rows.
+- The local cluster is insecure by design, but its ports bind only to
+  `127.0.0.1`.
+- The local outbox worker is the active eviction transport. The cloud
+  changefeed/Lambda path is optional deployment infrastructure.
+
+## License
+
+See [LICENSE](LICENSE).
