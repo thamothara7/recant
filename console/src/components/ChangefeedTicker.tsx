@@ -12,6 +12,15 @@ const TONE_ICON: Record<string, { icon: string; className: string }> = {
 export function ChangefeedTicker() {
   const ticker = useConsole((s) => s.ticker);
 
+  if (ticker.length === 0) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-2 text-body-sm text-on-surface-variant">
+        <Icon name="schedule" size={16} />
+        <span>No eviction events observed in this browser session.</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3">
       <span className="whitespace-nowrap text-label-md font-medium text-on-surface-variant">Live activity</span>
@@ -27,7 +36,9 @@ export function ChangefeedTicker() {
         {ticker.slice(0, 4).map((e) => (
           <div
             key={e.id}
-            className="flex min-w-0 shrink-0 items-center gap-1.5"
+            className={`flex min-w-0 shrink-0 items-center gap-1.5 px-1 ${
+              e.tone === "quarantine" || e.tone === "evict" ? "ticker-quarantine" : ""
+            }`}
             style={{ animation: "ticker-in .2s ease-out" }}
           >
             <Icon

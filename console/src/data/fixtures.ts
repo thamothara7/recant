@@ -16,9 +16,9 @@ import type {
 // "agent"; sources carry human labels; jargon lives behind the Advanced toggle.
 
 export const AGENTS: Agent[] = [
-  { id: "researcher", name: "Research bot", role: "Reads websites and saves notes", region: "us-east", pubkey8: "a19f3c7d" },
-  { id: "support", name: "Support bot", role: "Answers customer questions", region: "us-east", pubkey8: "6b02e4aa" },
-  { id: "ops", name: "Ops bot", role: "Sends refund payments", region: "us-west", pubkey8: "d4f1902c" },
+  { id: "researcher", name: "Research bot", role: "Reads vendor docs and web sources", region: "us-east", pubkey8: "a19f3c7d" },
+  { id: "support", name: "Support bot", role: "Answers customer refund questions", region: "us-east", pubkey8: "6b02e4aa" },
+  { id: "ops", name: "Ops bot", role: "Auto-processes refund payments", region: "us-west", pubkey8: "d4f1902c" },
 ];
 
 export const SOURCES: Source[] = [
@@ -68,7 +68,7 @@ export const BELIEFS: Belief[] = [
   // ops
   B("bel_ops_status", "ops", 1, "Partner refund processing API is operational.", "active", "src_status", "0c9d7e51", "34:12.900", "us-west"),
   B("bel_ops_plan", "ops", 2, "Scheduled refund batch runs nightly at 02:00 UTC.", "active", null, "4419aa2d", "34:50.233", "us-west"),
-  B("bel_ops_action", "ops", 3, "Auto-approve pending 365-day refund for customer #4471.", "suspect", null, "e5c33017", "35:31.418", "us-west"),
+  B("bel_ops_action", "ops", 3, "Auto-approve $4,471 refund for customer #4471 under 365-day policy.", "suspect", null, "e5c33017", "35:31.418", "us-west"),
 ];
 
 export const DERIVATIONS: Derivation[] = [
@@ -84,7 +84,7 @@ export const INCIDENT: Incident = {
   sourceId: "src_forum",
   openedBy: "investigator",
   summary:
-    "A random forum post claims refunds last 365 days. The official policy says 30 days. Every memory that grew from that post is a risk.",
+    "On Jul 2, Research bot ingested a forum post claiming 365-day refund windows. Support bot paraphrased this into its own memory with no link back. Ops bot queued a $4,471 refund based on the bad policy. Recant caught all 3 copies and stopped the payment.",
 };
 
 export const CLUSTER: ClusterNode[] = [

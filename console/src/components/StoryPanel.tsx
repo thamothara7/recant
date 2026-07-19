@@ -1,7 +1,7 @@
 import { POISONED_SOURCE, STORY } from "../data/story";
 import { markStoryDone } from "../lib/storyProgress";
 import { useConsole } from "../state/useConsole";
-import { Button } from "./m3";
+import { Button, Icon } from "./m3";
 
 // The guided walkthrough sheet (beginner-first redesign). One idea per step,
 // plain English, big Back/Next. The board above illustrates what the text says.
@@ -43,6 +43,13 @@ export function StoryPanel() {
 
         {/* narration */}
         <div className="min-w-0 flex-1">
+          {/* Scenario context shown on the first step only */}
+          {s.scenario && (
+            <div className="mb-1 flex items-center gap-1.5 text-label-md font-medium text-on-surface-variant">
+              <Icon name="smart_toy" size={14} />
+              {s.scenario}
+            </div>
+          )}
           <h2 className="text-title-lg text-on-surface">{s.title}</h2>
           <p className="mt-1 text-body-md text-on-surface-variant">{s.body}</p>
         </div>
@@ -89,6 +96,7 @@ export function StoryPanel() {
               variant={s.cta && !recanted ? "text" : "filled"}
               icon="arrow_forward"
               onClick={next}
+              className={first ? "story-pulse" : ""}
             >
               Next
             </Button>

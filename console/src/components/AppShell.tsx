@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { TopBar } from "./TopBar";
 import { AostScrubber } from "./AostScrubber";
 import { LeftRail } from "./LeftRail";
@@ -7,7 +8,7 @@ import { ChangefeedTicker } from "./ChangefeedTicker";
 import { ClusterBar } from "./ClusterBar";
 import { JudgeOverlay } from "./JudgeOverlay";
 import { StoryPanel } from "./StoryPanel";
-import { Icon } from "./m3";
+import { Button, Icon } from "./m3";
 import { STORY } from "../data/story";
 import { useConsole } from "../state/useConsole";
 
@@ -24,6 +25,26 @@ function aostClock(hoursBack: number): string {
   return `${p(Math.floor(total / 3600))}:${p(Math.floor((total % 3600) / 60))}:${p(total % 60)}`;
 }
 
+// One-time hint shown on first Explore visit. Stored in localStorage.
+const HINT_KEY = "recant-explore-hint-dismissed";
+function useExploreHint() {
+  const [show, setShow] = useState(false);
+  const mode = useConsole((s) => s.mode);
+  const hasSelection = useConsole((s) => !!(s.selectedBelief || s.selectedSource));
+  useEffect(() => {
+    if (mode === "explore" && !hasSelection && !localStorage.getItem(HINT_KEY)) {
+      setShow(true);
+    } else {
+      setShow(false);
+    }
+  }, [mode, hasSelection]);
+  const dismiss = () => {
+    localStorage.setItem(HINT_KEY, "1");
+    setShow(false);
+  };
+  return { show, dismiss };
+}
+
 export function AppShell() {
   const mode = useConsole((s) => s.mode);
   const storyStep = useConsole((s) => s.storyStep);
@@ -33,13 +54,15 @@ export function AppShell() {
   const recording = useConsole((s) => s.recordingMode);
   const hasSelection = useConsole((s) => !!(s.selectedBelief || s.selectedSource));
   const boardError = useConsole((s) => s.boardError);
+  const live = useConsole((s) => s.live);
   // In live mode, hold the board until the first fetch resolves so the fixture
   // seed never flashes with ids that vanish a beat later.
   const loading = useConsole((s) => s.live && !s.boardLoaded);
+  const hint = useExploreHint();
 
   const story = mode === "story";
   // The rewind slider appears once the story introduces it, and always in Explore.
-  const showScrubber = !story || !!STORY[storyStep].aost || storyStep >= 5;
+  const showScrubber = !story || !!STORY[storyStep]?.aost || storyStep >= STORY.length - 2;
 
   return (
     <div className={`relative flex h-full min-w-[1180px] flex-col ${recording && advanced ? "recording" : ""}`}>
@@ -72,6 +95,16 @@ export function AppShell() {
           {/* Judge chips dock bottom-leading inside the board card so they can
               never occlude the rail or the inspector */}
           {advanced && <JudgeOverlay />}
+          {/* One-time Explore hint for first-time visitors */}
+          {hint.show && (
+            <div className="absolute inset-x-0 top-14 z-20 mx-auto flex w-fit items-center gap-3 rounded-full bg-secondary-container px-5 py-2.5 text-on-secondary-container shadow-elevation-1">
+              <Icon name="touch_app" size={20} />
+              <span className="text-label-lg font-medium">Click any card to trace its provenance</span>
+              <Button variant="text" onClick={hint.dismiss} className="ml-1">
+                Got it
+              </Button>
+            </div>
+          )}
           {/* Past-mode wash over the board card only */}
           {pastMode && (
             <div
@@ -105,10 +138,10 @@ export function AppShell() {
       {/* The activity strip earns its place once there is activity to show:
           in the story it appears with the recant step's receipt, not as noise
           on the first-run frame. */}
-      {(!story || storyStep >= 3) && (
+      {(!story || storyStep >= 2) && (
         <div className="flex h-10 shrink-0 items-center gap-4 px-4">
           <ChangefeedTicker />
-          {advanced && <ClusterBar />}
+          {advanced && !live && <ClusterBar />}
         </div>
       )}
     </div>

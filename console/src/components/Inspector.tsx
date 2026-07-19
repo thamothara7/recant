@@ -128,6 +128,11 @@ function BeliefInspector({
         </div>
         <p className="mt-2 text-body-lg text-on-surface">{belief.content}</p>
         <p className="mt-1.5 text-body-sm text-on-surface-variant">{STATUS_EXPLAIN[status]}</p>
+        {parents.length > 0 && (
+          <p className="mt-1 text-body-sm text-on-surface-variant">
+            {parents.length} {parents.length === 1 ? "hop" : "hops"} from the original source
+          </p>
+        )}
       </div>
 
       <Section label="Where it came from">
@@ -283,9 +288,12 @@ function IncidentPanel({ source }: { source: Source }) {
 
 function Empty() {
   return (
-    <div className="flex h-full items-center justify-center px-6 text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+      <span className="grid h-12 w-12 place-items-center rounded-full bg-surface-container-high text-on-surface-variant">
+        <Icon name="touch_app" size={24} />
+      </span>
       <p className="text-body-md text-on-surface-variant">
-        Click any memory card on the board, or a source on the left, to see its full story.
+        Select a memory card to see its full provenance chain, or click a source to see everything it spawned.
       </p>
     </div>
   );

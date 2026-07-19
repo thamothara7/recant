@@ -17,14 +17,36 @@ export function layout(
   beliefs: Belief[],
   derivations: Derivation[],
 ): { nodes: Node<BeliefNodeData>[]; edges: Edge[] } {
-  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", ranksep: 96, nodesep: 26, marginx: 24, marginy: 24 });
-
   const ids = new Set(beliefs.map((b) => b.id));
-  for (const b of beliefs) g.setNode(b.id, { width: NODE_W, height: NODE_H });
   // Only edges whose endpoints are both on the board (a live derivation could
   // reference a belief outside this snapshot); dagre throws on dangling edges.
   const edgeList = derivations.filter((d) => ids.has(d.parentId) && ids.has(d.childId));
+
+  // Dagre stacks an edgeless graph into one tall column. Story steps one and
+  // two intentionally introduce independent facts, so a compact grid keeps
+  // those cards readable rather than shrinking them to fit a column.
+  if (edgeList.length === 0) {
+    const columns = Math.min(3, Math.max(1, beliefs.length));
+    const nodes: Node<BeliefNodeData>[] = beliefs.map((belief, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      return {
+        id: belief.id,
+        type: "belief",
+        position: { x: column * (NODE_W + 72), y: row * (NODE_H + 34) },
+        data: { belief },
+        draggable: false,
+        connectable: false,
+        selectable: true,
+      };
+    });
+    return { nodes, edges: [] };
+  }
+
+  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: "LR", ranksep: 96, nodesep: 26, marginx: 24, marginy: 24 });
+
+  for (const b of beliefs) g.setNode(b.id, { width: NODE_W, height: NODE_H });
   for (const d of edgeList) g.setEdge(d.parentId, d.childId);
   Dagre.layout(g);
 

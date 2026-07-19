@@ -15,6 +15,7 @@ export function BeliefCard({ id, data }: NodeProps<Node<BeliefNodeData>>) {
   const status = useDisplayStatuses()[id] ?? belief.status;
   const selected = useConsole((s) => s.selectedBelief === id);
   const hovered = useConsole((s) => s.hoverBelief === id);
+  const flipping = useConsole((s) => s.flippingBeliefs.has(id));
   const advanced = useConsole((s) => s.advanced);
   const select = useConsole((s) => s.selectBelief);
   const hover = useConsole((s) => s.hover);
@@ -34,7 +35,7 @@ export function BeliefCard({ id, data }: NodeProps<Node<BeliefNodeData>>) {
         selected
           ? "border-primary shadow-elevation-1 ring-1 ring-primary"
           : `border-outline-variant ${hovered ? "shadow-elevation-1" : ""}`
-      }`}
+      } ${flipping ? "status-flip" : ""}`}
       style={{ width: NODE_W }}
     >
       <Handle type="target" position={Position.Left} className="!h-1 !w-1 !min-w-0 !border-0 !bg-transparent" />

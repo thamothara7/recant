@@ -9,6 +9,7 @@ export function ClusterBar() {
   const cluster = useConsole((s) => s.cluster);
   const killNode = useConsole((s) => s.killNode);
   const reviveNode = useConsole((s) => s.reviveNode);
+  const nodeKillFlash = useConsole((s) => s.nodeKillFlash);
   const [queries, setQueries] = useState(48213);
 
   const upCount = cluster.filter((n) => n.up).length;
@@ -55,7 +56,7 @@ export function ClusterBar() {
       </div>
 
       <div className="flex items-center gap-1.5 whitespace-nowrap">
-        <span className="mono text-label-md tabular-nums text-on-surface">{queries.toLocaleString()}</span>
+        <span className={`mono text-label-md tabular-nums text-on-surface ${nodeKillFlash ? "counter-flash" : ""}`}>{queries.toLocaleString()}</span>
         <span className="text-label-sm font-medium text-on-surface-variant">forensics queries</span>
       </div>
     </div>

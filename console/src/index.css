@@ -321,6 +321,46 @@ body {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--md-error) 60%, transparent);
 }
 
+/* Story step 1: subtle breathing glow on the Next button so judges know to
+   click. Two gentle pulses then stop (iteration-count 3). */
+@keyframes story-pulse-ring {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--md-primary) 25%, transparent); }
+}
+.story-pulse {
+  animation: story-pulse-ring 1.6s ease-in-out 3;
+}
+
+/* Status flip: brief ring pulse on belief cards when their status changes
+   during the recant sequence. Applied via JS, removed after animation ends. */
+@keyframes status-flip {
+  0% { box-shadow: 0 0 0 0 var(--md-error); }
+  40% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--md-error) 35%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.status-flip {
+  animation: status-flip 0.6s ease-out;
+}
+
+/* Quarantine event highlight in the changefeed ticker */
+@keyframes ticker-highlight {
+  0% { background: color-mix(in srgb, var(--md-error-container) 60%, transparent); }
+  100% { background: transparent; }
+}
+.ticker-quarantine {
+  animation: ticker-highlight 2s ease-out forwards;
+  border-radius: var(--md-shape-sm);
+}
+
+/* Node-kill flash: briefly color the query counter in success */
+@keyframes counter-flash {
+  0% { color: var(--md-success); }
+  100% { color: var(--md-on-surface); }
+}
+.counter-flash {
+  animation: counter-flash 1.5s ease-out forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -11,34 +11,50 @@ import { BeliefCard } from "./BeliefCard";
 import { custodyEdgeIds, layout } from "../lib/graph";
 import { STATUS_META } from "../lib/format";
 import { useActiveBoard, useConsole, useDisplayStatuses } from "../state/useConsole";
-import { Chip } from "./m3";
+import { STORY } from "../data/story";
+import { Chip, Icon } from "./m3";
 
 const nodeTypes = { belief: BeliefCard };
 
 // Refit the graph whenever the board's box changes (inspector opening, mode
 // switch, window resize) so the side panel shrinks the canvas instead of
 // guillotining cards at its edge.
-function AutoFit({ container }: { container: React.RefObject<HTMLDivElement> }) {
+function AutoFit({
+  container,
+  graphKey,
+}: {
+  container: React.RefObject<HTMLDivElement>;
+  graphKey: string;
+}) {
   const { fitView } = useReactFlow();
   useEffect(() => {
     const el = container.current;
     if (!el) return;
     let raf = 0;
-    const ro = new ResizeObserver(() => {
+    const fit = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => fitView({ padding: 0.12, duration: 200 }));
-    });
+    };
+    const ro = new ResizeObserver(fit);
     ro.observe(el);
+    // Node sets change between walkthrough steps without resizing the board.
+    // Refit here so a newly introduced memory never lands below the fold.
+    fit();
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [container, fitView]);
+  }, [container, fitView, graphKey]);
   return null;
 }
 
-function BoardInner({ container }: { container: React.RefObject<HTMLDivElement> }) {
-  const board = useActiveBoard();
+function BoardInner({
+  container,
+  board,
+}: {
+  container: React.RefObject<HTMLDivElement>;
+  board: ReturnType<typeof useActiveBoard>;
+}) {
   // Re-layout only when the graph shape changes (fixtures are stable; live
   // recant refetches the board and legitimately re-lays out).
   const base = useMemo(
@@ -48,6 +64,9 @@ function BoardInner({ container }: { container: React.RefObject<HTMLDivElement> 
   const selected = useConsole((s) => s.selectedBelief);
   const hovered = useConsole((s) => s.hoverBelief);
   const recanting = useConsole((s) => s.recanting);
+  const graphKey = `${board.beliefs.map((belief) => belief.id).join(",")}|${board.derivations
+    .map((edge) => `${edge.parentId}>${edge.childId}`)
+    .join(",")}`;
 
   // The custody thread lights along the selected (or hovered) belief's chain.
   const edges: Edge[] = useMemo(() => {
@@ -77,7 +96,7 @@ function BoardInner({ container }: { container: React.RefObject<HTMLDivElement> 
       proOptions={{ hideAttribution: true }}
       onPaneClick={() => useConsole.getState().selectBelief(null)}
     >
-      <AutoFit container={container} />
+      <AutoFit container={container} graphKey={graphKey} />
       <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="var(--md-outline-variant)" />
       {recanting && (
         <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
@@ -98,12 +117,37 @@ function BoardInner({ container }: { container: React.RefObject<HTMLDivElement> 
 export function ProvenanceBoard() {
   const statuses = useDisplayStatuses();
   const activeBoard = useActiveBoard();
-  const suspect = Object.values(statuses).filter((v) => v === "suspect").length;
-  const quarantined = Object.values(statuses).filter((v) => v === "quarantined").length;
+  const mode = useConsole((s) => s.mode);
+  const storyStep = useConsole((s) => s.storyStep);
+  const selectSource = useConsole((s) => s.selectSource);
+  const storyVisible = mode === "story" ? STORY[storyStep].visible : undefined;
+  const board = useMemo(
+    () =>
+      storyVisible
+        ? {
+            ...activeBoard,
+            beliefs: activeBoard.beliefs.filter((belief) => storyVisible.includes(belief.id)),
+            derivations: activeBoard.derivations.filter(
+              (edge) => storyVisible.includes(edge.parentId) && storyVisible.includes(edge.childId),
+            ),
+          }
+        : activeBoard,
+    [activeBoard, storyVisible],
+  );
+  const suspect = board.beliefs.filter((belief) => statuses[belief.id] === "suspect").length;
+  const quarantined = board.beliefs.filter((belief) => statuses[belief.id] === "quarantined").length;
   const boardRef = useRef<HTMLDivElement>(null);
   // The one-line hint replaces the old always-open empty details panel.
-  const explore = useConsole((s) => s.mode === "explore");
+  const explore = mode === "explore";
   const hasSelection = useConsole((s) => !!(s.selectedBelief || s.selectedSource));
+  const untrusted = board.sources.find((source) => source.trust === "untrusted");
+  const closure = untrusted ? closureIds(board, untrusted.id) : [];
+  const contained =
+    closure.length > 0 &&
+    closure.every((id) => {
+      const status = statuses[id] ?? board.beliefs.find((belief) => belief.id === id)?.status;
+      return status === "quarantined" || status === "retracted";
+    });
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col bg-surface">
@@ -113,13 +157,27 @@ export function ProvenanceBoard() {
         <div className="flex shrink-0 items-center gap-3">
           <h2 className="text-title-sm font-medium text-on-surface-variant">Memory board</h2>
           <span className="whitespace-nowrap text-body-sm text-on-surface-variant">
-            {activeBoard.beliefs.length} memories
+            {board.beliefs.length} {mode === "story" ? "memories in this step" : "memories"}
           </span>
           {explore && !hasSelection && (
-            <span className="whitespace-nowrap text-body-sm text-on-surface-variant">
-              Click a card for its full story
-            </span>
+            untrusted ? (
+              <button
+                onClick={() => selectSource(untrusted.id)}
+                className="state-layer inline-flex items-center gap-1.5 rounded-full bg-error-container px-3 py-1 text-label-md font-medium text-on-error-container"
+              >
+                <Icon name="gpp_bad" size={16} />
+                {contained
+                  ? "Incident contained. Inspect the proof."
+                  : `Review ${closure.length} memories from the untrusted source`}
+              </button>
+            ) : (
+              <span className="whitespace-nowrap text-body-sm text-on-surface-variant">
+                Click a card for its full story
+              </span>
+            )
           )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
           {suspect > 0 && (
             <Chip
               icon={STATUS_META.suspect.icon}
@@ -136,17 +194,33 @@ export function ProvenanceBoard() {
               onContainer={STATUS_META.quarantined.onContainer}
             />
           )}
+          {board.derivations.length > 0 && <Legend />}
         </div>
-        <Legend />
       </header>
 
       <div ref={boardRef} className="relative min-h-0 flex-1">
         <ReactFlowProvider>
-          <BoardInner container={boardRef} />
+          <BoardInner container={boardRef} board={board} />
         </ReactFlowProvider>
       </div>
     </section>
   );
+}
+
+function closureIds(board: ReturnType<typeof useActiveBoard>, sourceId: string): string[] {
+  const direct = board.beliefs.filter((belief) => belief.sourceId === sourceId).map((belief) => belief.id);
+  const seen = new Set(direct);
+  const pending = [...direct];
+  while (pending.length) {
+    const parent = pending.pop()!;
+    for (const edge of board.derivations) {
+      if (edge.parentId === parent && !seen.has(edge.childId)) {
+        seen.add(edge.childId);
+        pending.push(edge.childId);
+      }
+    }
+  }
+  return [...seen];
 }
 
 // Only the edge kinds need a legend: every card already carries a labeled

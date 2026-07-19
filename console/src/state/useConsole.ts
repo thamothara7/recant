@@ -124,6 +124,9 @@ interface ConsoleState {
   selectedSource: string | null;
   recanting: boolean;
   recantedSource: string | null;
+  // Belief ids whose status just flipped in the recant sequence; the pulse
+  // animation on BeliefCard keys off this set. Cleared after the animation.
+  flippingBeliefs: Set<string>;
   incidentOpen: boolean;
   aostHours: number; // 0 = live; negative = time-travel back
   overlayOn: boolean;
@@ -131,7 +134,11 @@ interface ConsoleState {
   primitives: JudgePrimitive[];
   primitiveLog: JudgePrimitive[];
   ticker: ChangefeedEvent[];
+  // Live mode must never borrow fixture activity. This holds only events
+  // generated in this browser session from a real recant response.
+  liveTicker: ChangefeedEvent[];
   cluster: ClusterNode[];
+  nodeKillFlash: boolean;
 
   setMode: (mode: Mode) => void;
   setStoryStep: (n: number) => void;
@@ -172,14 +179,17 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   selectedSource: null,
   recanting: false,
   recantedSource: null,
+  flippingBeliefs: new Set(),
   incidentOpen: false,
   aostHours: 0,
   overlayOn: true,
   recordingMode: false,
   primitives: [],
   primitiveLog: [],
-  ticker: TICKER_SEED,
+  ticker: CONFIG.live ? [] : TICKER_SEED,
+  liveTicker: [],
   cluster: CLUSTER,
+  nodeKillFlash: false,
 
   setMode: (mode) => {
     if (mode === "story") {
@@ -196,6 +206,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
         aostHours: 0,
         statuses: s.live ? statusesOf(s.board.beliefs) : s.statuses,
         recantedSource: s.live ? s.liveRecantedSource : s.recantedSource,
+        ticker: s.live ? s.liveTicker : s.ticker,
         selectedBelief: null,
         selectedSource: null,
       });
@@ -265,7 +276,9 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     // Live recant: the real serializable transaction on the cluster. The sweep
     // plays while the request is in flight; the board is refetched so the
     // flipped statuses are the database's, not a client guess.
-    if (CONFIG.liveRecant) {
+      // The Story journey is a deterministic, safe walkthrough. Only an
+      // Explore-mode action may be sent to a configured live recant API.
+      if (CONFIG.liveRecant && get().mode === "explore") {
       set({ recanting: true, incidentOpen: true });
       (async () => {
         try {
@@ -276,21 +289,27 @@ export const useConsole = create<ConsoleState>((set, get) => ({
             `UPDATE beliefs SET status='quarantined' WHERE belief_id = ANY($1) -- ${res.closureSize} rows`,
           );
           await get().loadBoard();
+          const event: ChangefeedEvent = {
+            id: evtId++,
+            at: nowClock(),
+            text: `Took back ${res.closureSize} memories from ${res.agentCount} bots, all at once`,
+            tone: "quarantine",
+          };
+          const flipped = new Set(res.newlyFlipped);
           set((s) => ({
             statuses: statusesOf(s.board.beliefs),
-            ticker: [
-              {
-                id: evtId++,
-                at: nowClock(),
-                text: `Took back ${res.closureSize} memories from ${res.agentCount} bots, all at once`,
-                tone: "quarantine" as const,
-              },
-              ...s.ticker,
-            ].slice(0, 40),
+            ticker: [event, ...s.liveTicker].slice(0, 40),
+            liveTicker: [event, ...s.liveTicker].slice(0, 40),
             recanting: false,
             recantedSource: sourceId,
             liveRecantedSource: sourceId,
+            flippingBeliefs: flipped,
+            // Auto-select the most dramatic affected belief so the inspector
+            // immediately shows the consequence.
+            selectedBelief: res.newlyFlipped.length > 0 ? res.newlyFlipped[res.newlyFlipped.length - 1] : s.selectedBelief,
+            selectedSource: null,
           }));
+          window.setTimeout(() => set({ flippingBeliefs: new Set() }), 800);
         } catch (e) {
           set({ recanting: false, boardError: e instanceof Error ? e.message : String(e) });
         }
@@ -302,7 +321,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     // live ids, so close over the live board, not the fixture graph, and flip
     // those ids. Without this the fixture closure is empty for live UUIDs and
     // the recant would silently flip nothing while marking the source done.
-    if (get().live) {
+      if (get().live && get().mode === "explore") {
       const board = get().board;
       const closure = closureOverBoard(board, sourceId);
       const bots = new Set(
@@ -315,6 +334,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
         `UPDATE beliefs SET status='quarantined' WHERE belief_id = ANY($1) -- ${closure.length} rows`,
       );
       window.setTimeout(() => {
+        const flipped = new Set(closure);
         set((s) => {
           const statuses = { ...s.statuses };
           for (const id of closure) statuses[id] = "quarantined";
@@ -332,8 +352,13 @@ export const useConsole = create<ConsoleState>((set, get) => ({
             recanting: false,
             recantedSource: sourceId,
             liveRecantedSource: sourceId,
+            flippingBeliefs: flipped,
+            // Auto-select the ops action so the inspector shows the consequence
+            selectedBelief: "bel_ops_action",
+            selectedSource: null,
           };
         });
+        window.setTimeout(() => set({ flippingBeliefs: new Set() }), 800);
       }, 1150);
       return;
     }
@@ -351,6 +376,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     // in one visual beat. Kept under the 2.5s budget.
     window.setTimeout(() => {
       get().flash("SERIALIZABLE TXN", `${get().cluster.filter((n) => n.up).length} nodes · 41ms`, `UPDATE beliefs SET status='quarantined' WHERE belief_id = ANY($1) -- ${closure.length} rows`);
+      const flipped = new Set(closure);
       set((s) => {
         const statuses = { ...s.statuses };
         for (const id of closure) statuses[id] = "quarantined";
@@ -359,9 +385,14 @@ export const useConsole = create<ConsoleState>((set, get) => ({
           ticker: [...recantEvents(sourceId), ...s.ticker].slice(0, 40),
           recanting: false,
           recantedSource: sourceId,
+          flippingBeliefs: flipped,
+          // Auto-select the ops action so the inspector shows the consequence
+          selectedBelief: "bel_ops_action",
+          selectedSource: null,
         };
       });
       get().flash("CHANGEFEED", "→ lambda · 380ms", "CREATE CHANGEFEED FOR beliefs INTO 'webhook-https://…'");
+      window.setTimeout(() => set({ flippingBeliefs: new Set() }), 800);
     }, 1150);
   },
 
@@ -374,8 +405,9 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   toggleRecording: () => set((s) => ({ recordingMode: !s.recordingMode })),
 
   killNode: (id) => {
-    set((s) => ({ cluster: s.cluster.map((n) => (n.id === id ? { ...n, up: false } : n)) }));
+    set((s) => ({ cluster: s.cluster.map((n) => (n.id === id ? { ...n, up: false } : n)), nodeKillFlash: true }));
     get().flash("MCP TOOL", "read-only · 8ms", "SHOW RANGES FROM TABLE beliefs -- forensics survives node loss");
+    window.setTimeout(() => set({ nodeKillFlash: false }), 1500);
   },
   reviveNode: (id) =>
     set((s) => ({ cluster: s.cluster.map((n) => (n.id === id ? { ...n, up: true } : n)) })),
@@ -418,11 +450,14 @@ export const useConsole = create<ConsoleState>((set, get) => ({
       selectedSource: null,
       recanting: false,
       recantedSource: null,
+      flippingBeliefs: new Set(),
       incidentOpen: false,
       aostHours: 0,
-      ticker: TICKER_SEED,
+      ticker: CONFIG.live ? [] : TICKER_SEED,
+      liveTicker: [],
       cluster: CLUSTER,
       primitives: [],
+      nodeKillFlash: false,
       storyStep: 0,
     }),
 }));
