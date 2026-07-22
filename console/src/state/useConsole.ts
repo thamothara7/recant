@@ -276,9 +276,9 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     // Live recant: the real serializable transaction on the cluster. The sweep
     // plays while the request is in flight; the board is refetched so the
     // flipped statuses are the database's, not a client guess.
-      // The Story journey is a deterministic, safe walkthrough. Only an
-      // Explore-mode action may be sent to a configured live recant API.
-      if (CONFIG.liveRecant && get().mode === "explore") {
+    // The Story journey is a deterministic, safe walkthrough. Only an
+    // Explore-mode action may be sent to a configured live recant API.
+    if (CONFIG.liveRecant && get().mode === "explore") {
       set({ recanting: true, incidentOpen: true });
       (async () => {
         try {
@@ -321,7 +321,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     // live ids, so close over the live board, not the fixture graph, and flip
     // those ids. Without this the fixture closure is empty for live UUIDs and
     // the recant would silently flip nothing while marking the source done.
-      if (get().live && get().mode === "explore") {
+    if (get().live && get().mode === "explore") {
       const board = get().board;
       const closure = closureOverBoard(board, sourceId);
       const bots = new Set(
@@ -353,8 +353,9 @@ export const useConsole = create<ConsoleState>((set, get) => ({
             recantedSource: sourceId,
             liveRecantedSource: sourceId,
             flippingBeliefs: flipped,
-            // Auto-select the ops action so the inspector shows the consequence
-            selectedBelief: "bel_ops_action",
+            // Auto-select the last tainted belief so the inspector shows the
+            // consequence even when live IDs differ from fixture IDs.
+            selectedBelief: closure[closure.length - 1] ?? s.selectedBelief,
             selectedSource: null,
           };
         });
