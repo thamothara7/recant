@@ -88,6 +88,7 @@ export function closureOverBoard(board: Board, sourceId: string): string[] {
 
 let chipId = 1;
 let evtId = TICKER_SEED.length + 1;
+let simulationId = 0;
 const nowClock = () => clockUtc(new Date().toISOString());
 
 function recantEvents(sourceId: string): ChangefeedEvent[] {
@@ -322,6 +323,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     // those ids. Without this the fixture closure is empty for live UUIDs and
     // the recant would silently flip nothing while marking the source done.
     if (get().live && get().mode === "explore") {
+      const currentSimulation = ++simulationId;
       const board = get().board;
       const closure = closureOverBoard(board, sourceId);
       const bots = new Set(
@@ -334,6 +336,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
         `UPDATE beliefs SET status='quarantined' WHERE belief_id = ANY($1) -- ${closure.length} rows`,
       );
       window.setTimeout(() => {
+        if (currentSimulation !== simulationId) return;
         const flipped = new Set(closure);
         set((s) => {
           const statuses = { ...s.statuses };
@@ -365,6 +368,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     }
 
     const closure = taintClosure(sourceId);
+    const currentSimulation = ++simulationId;
     const explicit = closure.filter((id) =>
       DERIVATIONS.some((d) => d.childId === id && d.kind === "explicit"),
     ).length;
@@ -376,6 +380,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     // The recant sequence (skill 6): threads pulse, UV sweep, then statuses flip
     // in one visual beat. Kept under the 2.5s budget.
     window.setTimeout(() => {
+      if (currentSimulation !== simulationId) return;
       get().flash("SERIALIZABLE TXN", `${get().cluster.filter((n) => n.up).length} nodes · 41ms`, `UPDATE beliefs SET status='quarantined' WHERE belief_id = ANY($1) -- ${closure.length} rows`);
       const flipped = new Set(closure);
       set((s) => {
@@ -444,21 +449,22 @@ export const useConsole = create<ConsoleState>((set, get) => ({
     }
   },
 
-  reset: () =>
-    set({
-      statuses: initialStatuses(),
+  reset: () => {
+    simulationId += 1;
+    set((s) => ({
+      statuses: s.live ? statusesOf(s.board.beliefs) : initialStatuses(),
       selectedBelief: null,
       selectedSource: null,
       recanting: false,
-      recantedSource: null,
+      recantedSource: s.live ? s.liveRecantedSource : null,
       flippingBeliefs: new Set(),
       incidentOpen: false,
       aostHours: 0,
-      ticker: CONFIG.live ? [] : TICKER_SEED,
-      liveTicker: [],
+      ticker: s.live ? s.liveTicker : TICKER_SEED,
       cluster: CLUSTER,
       primitives: [],
       nodeKillFlash: false,
       storyStep: 0,
-    }),
+    }));
+  },
 }));

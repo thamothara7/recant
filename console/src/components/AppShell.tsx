@@ -10,6 +10,11 @@ import { JudgeOverlay } from "./JudgeOverlay";
 import { StoryPanel } from "./StoryPanel";
 import { Button, Icon } from "./m3";
 import { STORY } from "../data/story";
+import {
+  dismissExploreHint,
+  EXPLORE_INTERACTION_EVENT,
+  isExploreHintDismissed,
+} from "../lib/exploreHint";
 import { useConsole } from "../state/useConsole";
 
 // Beginner-first layout. Story mode: board + walkthrough sheet, nothing else.
@@ -26,23 +31,23 @@ function aostClock(hoursBack: number): string {
 }
 
 // One-time hint shown on first Explore visit. Stored in localStorage.
-const HINT_KEY = "recant-explore-hint-dismissed";
 function useExploreHint() {
   const [show, setShow] = useState(false);
   const mode = useConsole((s) => s.mode);
   const hasSelection = useConsole((s) => !!(s.selectedBelief || s.selectedSource));
   useEffect(() => {
-    if (mode === "explore" && !hasSelection && !localStorage.getItem(HINT_KEY)) {
+    if (mode === "explore" && !hasSelection && !isExploreHintDismissed()) {
       setShow(true);
     } else {
       setShow(false);
     }
   }, [mode, hasSelection]);
-  const dismiss = () => {
-    localStorage.setItem(HINT_KEY, "1");
-    setShow(false);
-  };
-  return { show, dismiss };
+  useEffect(() => {
+    const close = () => setShow(false);
+    window.addEventListener(EXPLORE_INTERACTION_EVENT, close);
+    return () => window.removeEventListener(EXPLORE_INTERACTION_EVENT, close);
+  }, []);
+  return { show, dismiss: dismissExploreHint };
 }
 
 export function AppShell() {

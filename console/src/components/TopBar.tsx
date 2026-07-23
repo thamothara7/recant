@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useConsole } from "../state/useConsole";
 import { LogoMark } from "./LogoMark";
 import { Icon, IconButton } from "./m3";
+import { MemorySearch } from "./MemorySearch";
 
 // Product chrome stays product chrome: brand, Story/Explore switch, theme,
 // Advanced. The judge-facing demo machinery (moments 1-6, overlay, recording)
@@ -23,9 +24,22 @@ export function TopBar() {
   const toggleAdvanced = useConsole((s) => s.toggleAdvanced);
 
   // Theme is local, not zustand: it must survive story resets.
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem("recant.theme");
+      if (saved) return saved === "dark";
+    } catch {
+      // Use the system setting when storage is unavailable.
+    }
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? "dark" : "";
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    try {
+      window.localStorage.setItem("recant.theme", dark ? "dark" : "light");
+    } catch {
+      // The theme still applies for this visit.
+    }
   }, [dark]);
 
   return (
@@ -37,6 +51,8 @@ export function TopBar() {
         </div>
 
         <div className="flex items-center gap-2">
+          {mode === "explore" && <MemorySearch />}
+
           {/* Story / Explore switch: M3 segmented button */}
           <div
             role="tablist"
@@ -63,7 +79,7 @@ export function TopBar() {
 
           <IconButton
             icon={dark ? "light_mode" : "dark_mode"}
-            label="Toggle theme"
+            label={dark ? "Use light theme" : "Use dark theme"}
             onClick={() => setDark((d) => !d)}
           />
 

@@ -32,7 +32,7 @@ export function LeftRail() {
   const selectSource = useConsole((s) => s.selectSource);
 
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col overflow-y-auto">
+    <aside className="flex w-full shrink-0 flex-col overflow-y-auto">
       <h2 className="px-4 pb-2 pt-4 text-title-sm font-medium text-on-surface-variant">Your bots</h2>
       <div className="flex flex-col">
         {board.agents.map((a) => {
