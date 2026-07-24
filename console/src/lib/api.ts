@@ -15,15 +15,22 @@ export interface Board {
 
 const FETCH_TIMEOUT_MS = 8000;
 
-async function getJson<T>(url: string): Promise<T> {
-  // A reachable-but-unresponsive host must not pin the loading spinner forever;
-  // time out and let the caller fall back to fixtures with a banner.
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<{ body: T; response: Response }> {
+  // A reachable but unresponsive host must not pin loading or destructive
+  // actions forever. Keep one timeout policy across reads and writes.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const r = await fetch(url, { headers: { Accept: "application/json" }, signal: ctrl.signal });
-    if (!r.ok) throw new Error(`GET ${url} -> ${r.status}`);
-    return (await r.json()) as T;
+    const response = await fetch(url, { ...init, signal: ctrl.signal });
+    if (!response.ok) {
+      throw new Error(`${init?.method ?? "GET"} ${url} -> ${response.status}`);
+    }
+    return { body: (await response.json()) as T, response };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${FETCH_TIMEOUT_MS / 1000} seconds`);
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -94,7 +101,9 @@ function mapBelief(b: ApiBelief, region: string): Belief {
 }
 
 export async function fetchBoard(): Promise<Board> {
-  const raw = await getJson<ApiBoard>(`${CONFIG.forensicsUrl}/board`);
+  const { body: raw } = await fetchJson<ApiBoard>(`${CONFIG.forensicsUrl}/board`, {
+    headers: { Accept: "application/json" },
+  });
   const agentRegion = new Map(raw.agents.map((a) => [a.agent_id, a.region]));
   return {
     agents: raw.agents.map((a) => ({
@@ -130,17 +139,19 @@ export interface PreviewResult {
 // Read-only taint preview: the real closure the recant would flip, including
 // the vector-inferred copies the client cannot see until they are materialized.
 export async function fetchPreview(sourceId: string): Promise<PreviewResult> {
-  const r = await fetch(`${CONFIG.quarantineUrl}/taint/preview`, {
+  const { body } = await fetchJson<{
+    closure_ids?: string[];
+    agent_ids?: string[];
+    would_flip?: number;
+  }>(`${CONFIG.quarantineUrl}/taint/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ source_id: sourceId }),
   });
-  if (!r.ok) throw new Error(`POST /taint/preview -> ${r.status}`);
-  const b = await r.json();
   return {
-    closureIds: b.closure_ids ?? [],
-    agentCount: (b.agent_ids ?? []).length,
-    wouldFlip: b.would_flip ?? 0,
+    closureIds: body.closure_ids ?? [],
+    agentCount: (body.agent_ids ?? []).length,
+    wouldFlip: body.would_flip ?? 0,
   };
 }
 
@@ -156,19 +167,23 @@ export interface RecantResult {
 // Returns the recant receipt plus the X-Recant-Primitive header, so the Judge
 // Overlay flashes the real transaction timing instead of a scripted number.
 export async function postRecant(sourceId: string, actor = "operator"): Promise<RecantResult> {
-  const r = await fetch(`${CONFIG.quarantineUrl}/recant`, {
+  const { body, response } = await fetchJson<{
+    incident_id: string;
+    closure_ids?: string[];
+    newly_flipped_ids?: string[];
+    agent_ids?: string[];
+    inferred_edges?: unknown[];
+  }>(`${CONFIG.quarantineUrl}/recant`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ source_id: sourceId, actor }),
   });
-  if (!r.ok) throw new Error(`POST /recant -> ${r.status}`);
-  const body = await r.json();
   return {
     incidentId: body.incident_id,
     closureSize: (body.closure_ids ?? []).length,
     newlyFlipped: body.newly_flipped_ids ?? [],
     agentCount: (body.agent_ids ?? []).length,
     inferredEdges: (body.inferred_edges ?? []).length,
-    primitive: r.headers.get("X-Recant-Primitive"),
+    primitive: response.headers.get("X-Recant-Primitive"),
   };
 }

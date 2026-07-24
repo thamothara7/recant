@@ -11,23 +11,44 @@ import { Icon } from "./m3";
 export function RecantDialog({ sourceId }: { sourceId: string }) {
   const [open, setOpen] = useState(false);
   const [liveClosure, setLiveClosure] = useState<string[] | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   const board = useActiveBoard();
   const recant = useConsole((s) => s.recant);
   const already = useConsole((s) => s.recantedSource === sourceId);
 
   // In live mode the client can only see explicit edges before the recant, so
   // ask the taint engine for the real closure (incl. vector-inferred copies)
-  // when the dialog opens. Falls back to the client closure on any error.
+  // when the dialog opens. Never enable the destructive action with a stale or
+  // partial blast radius.
   useEffect(() => {
-    if (!open || !CONFIG.liveRecant) return;
+    if (!open || !CONFIG.liveRecant) {
+      setLiveClosure(null);
+      setPreviewLoading(false);
+      setPreviewError(null);
+      return;
+    }
     let cancelled = false;
+    setLiveClosure(null);
+    setPreviewError(null);
+    setPreviewLoading(true);
     fetchPreview(sourceId)
-      .then((p) => !cancelled && setLiveClosure(p.closureIds))
-      .catch(() => !cancelled && setLiveClosure(null));
+      .then((preview) => {
+        if (!cancelled) setLiveClosure(preview.closureIds);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPreviewError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [open, sourceId]);
+  }, [open, previewAttempt, sourceId]);
 
   const agentName = (id: string) => board.agents.find((a) => a.id === id)?.name ?? id;
   const src = board.sources.find((s) => s.id === sourceId);
@@ -35,6 +56,7 @@ export function RecantDialog({ sourceId }: { sourceId: string }) {
   const closure = liveClosure ?? clientClosure;
   const affected = board.beliefs.filter((b) => closure.includes(b.id));
   const bots = new Set(affected.map((b) => b.agentId));
+  const previewReady = !CONFIG.liveRecant || liveClosure !== null;
   if (!src) return null;
 
   return (
@@ -71,12 +93,47 @@ export function RecantDialog({ sourceId }: { sourceId: string }) {
           {/* Inline emphasis by weight, never hue (M3 voice): color inside body
               copy is reserved for the confirm action itself. */}
           <Dialog.Description className="mt-2 text-body-md text-on-surface-variant">
-            Recant will block{" "}
-            <span className="font-medium text-on-surface">
-              {closure.length} memories across {bots.size} bots
-            </span>{" "}
-            at the same time, including reworded copies that never linked back to the source.
+            {previewLoading ? (
+              "Checking every linked and reworded memory before you continue."
+            ) : (
+              <>
+                Recant will block{" "}
+                <span className="font-medium text-on-surface">
+                  {closure.length} memories across {bots.size} bots
+                </span>{" "}
+                at the same time, including reworded copies that never linked back to the source.
+              </>
+            )}
           </Dialog.Description>
+
+          {previewLoading && (
+            <div
+              role="status"
+              className="mt-3 flex items-center gap-2 rounded-md3-sm bg-surface-container-highest px-3 py-2 text-body-sm text-on-surface-variant"
+            >
+              <Icon name="progress_activity" size={18} className="animate-spin" />
+              Computing the contamination closure
+            </div>
+          )}
+
+          {previewError && (
+            <div
+              role="alert"
+              className="mt-3 flex items-start gap-2 rounded-md3-sm bg-error-container px-3 py-2 text-body-sm text-on-error-container"
+            >
+              <Icon name="cloud_off" size={18} className="mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p>Could not verify the full blast radius. No memories were changed.</p>
+                <p className="mt-1 break-words">{previewError}</p>
+                <button
+                  onClick={() => setPreviewAttempt((attempt) => attempt + 1)}
+                  className="state-layer mt-2 inline-flex h-8 items-center rounded-full px-3 text-label-md font-medium"
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="mt-3 rounded-md3-sm bg-surface-container-highest px-3 py-2 text-body-sm text-on-surface-variant">
             Source: <span className="text-on-surface">{src.label}</span>{" "}
@@ -104,13 +161,14 @@ export function RecantDialog({ sourceId }: { sourceId: string }) {
             {/* Verb-phrase label (no "Yes," prefix); tonal error keeps the
                 destructive weight without a filled button inside a dialog. */}
             <button
+              disabled={!previewReady || previewLoading}
               onClick={() => {
                 recant(sourceId);
                 setOpen(false);
               }}
-              className="state-layer inline-flex h-10 items-center justify-center gap-2 rounded-full bg-error-container px-6 text-label-lg font-medium text-on-error-container"
+              className="state-layer inline-flex h-10 items-center justify-center gap-2 rounded-full bg-error-container px-6 text-label-lg font-medium text-on-error-container disabled:pointer-events-none disabled:opacity-40"
             >
-              Block {closure.length} memories
+              {previewLoading ? "Checking memories" : `Block ${closure.length} memories`}
             </button>
           </div>
         </Dialog.Content>
