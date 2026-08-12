@@ -76,7 +76,7 @@ export function AppShell() {
         <div className="mx-3 mb-2 flex items-center gap-2 rounded-md3-md bg-error-container px-4 py-2 text-on-error-container">
           <Icon name="cloud_off" size={18} />
           <span className="text-body-sm">
-            Live data unavailable, showing the built-in demo. ({boardError})
+            Could not refresh live data. The last known board is still shown. ({boardError})
           </span>
         </div>
       )}

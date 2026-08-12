@@ -180,6 +180,26 @@ class TestCustodyChain:
         assert p.json()["chain_valid"] is True
         assert p.json()["sig_valid"] is False
 
+    def test_tail_truncation_is_detected(self, client, forensics_client):
+        """A valid prefix is not a valid full chain when the signed head says a
+        later row existed. The forensics endpoint must check the agent head."""
+        from services.common.db import get_pool
+
+        agent = client.post(
+            "/agents", json={"name": f"tail-{time.time_ns()}"}
+        ).json()
+        _seed_belief(client, agent["agent_id"], "first belief")
+        second = _seed_belief(client, agent["agent_id"], "second belief")
+        with get_pool().connection() as conn:
+            conn.execute(
+                "DELETE FROM beliefs WHERE belief_id = %s", (second["belief_id"],)
+            )
+
+        r = forensics_client.get(f"/agents/{agent['agent_id']}/custody-chain")
+        assert r.status_code == 200
+        assert r.json()["chain_length"] == 1
+        assert r.json()["valid"] is False
+
 
 @requires_db
 class TestIncidentSummary:

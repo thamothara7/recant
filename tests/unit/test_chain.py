@@ -18,7 +18,7 @@ def _build(agent_id, specs):
         h = chain.chain_hash(prev, payload)
         records.append(chain.ChainRecord(
             agent_id=agent_id, seq=i, content=content, source_id=source_id,
-            parent_ids=parent_ids, ts=TS, hash=h,
+            parent_ids=parent_ids, ts=TS, prev_hash=prev, hash=h,
         ))
         prev = h
     return records
@@ -60,3 +60,10 @@ def test_tampered_hash_breaks_rest_of_chain():
     records[0].hash = b"\x01" * 32
     ok, bad = chain.verify_chain(records)
     assert ok is False and bad == 0
+
+
+def test_tampered_stored_prev_hash_is_detected():
+    records = _build(uuid4(), [("one", None, []), ("two", None, [])])
+    records[1].prev_hash = b"\xff" * 32
+    ok, bad = chain.verify_chain(records)
+    assert ok is False and bad == 1

@@ -283,11 +283,24 @@ def custody_chain(agent_id: UUID, response: Response):
                     if d.kind == "explicit"
                 ],
                 ts=r[5],
+                prev_hash=bytes(r[7]),
                 hash=bytes(r[6]),
             )
             for i, r in enumerate(rows)
         ]
         valid, _ = chain.verify_chain(records)
+
+        # A valid prefix is not necessarily the full chain. The agent row is
+        # the committed head, so compare it before reporting custody as valid.
+        if valid:
+            if records:
+                valid = (
+                    records[-1].seq == int(head_seq)
+                    and head_hash is not None
+                    and records[-1].hash == bytes(head_hash)
+                )
+            else:
+                valid = int(head_seq) == 0 and head_hash is None
 
         # Also verify signatures
         if valid and records:

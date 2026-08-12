@@ -100,7 +100,22 @@ def handler(event: dict, context: object = None, *, events_client=None) -> dict:
 
     put_calls = 0
     for i in range(0, len(entries), PUTEVENTS_BATCH):
-        events_client.put_events(Entries=entries[i : i + PUTEVENTS_BATCH])
+        batch = entries[i : i + PUTEVENTS_BATCH]
+        result = events_client.put_events(Entries=batch)
         put_calls += 1
+        # PutEvents reports per-entry failures in an otherwise successful HTTP
+        # response. Failing the webhook makes CockroachDB retry the envelope;
+        # downstream delivery-ledger idempotency absorbs any repeated successes.
+        failed = int(result.get("FailedEntryCount", 0) or 0)
+        if failed:
+            errors = [
+                item.get("ErrorCode", "unknown")
+                for item in result.get("Entries", [])
+                if item.get("ErrorCode")
+            ]
+            detail = ", ".join(errors) if errors else "unknown error"
+            raise RuntimeError(
+                f"EventBridge rejected {failed} of {len(batch)} entries: {detail}"
+            )
 
     return {"statusCode": 200, "body": json.dumps({"events": len(events), "put_calls": put_calls})}

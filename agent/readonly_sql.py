@@ -19,8 +19,13 @@ does not change between the two.
 
 from __future__ import annotations
 
+import math
 import os
+from collections.abc import Mapping
+from datetime import date, datetime, time
+from decimal import Decimal
 from typing import Any, Callable
+from uuid import UUID
 
 import psycopg
 
@@ -56,14 +61,35 @@ def validate(sql: str) -> str:
     return stripped
 
 
+def _json_ready(value: Any) -> Any:
+    """Convert psycopg values into Bedrock tool-result document values."""
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    if isinstance(value, str):
+        return value if len(value) <= _MAX_CELL else value[:_MAX_CELL] + "..."
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex()[:_MAX_CELL]
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(k): _json_ready(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(v) for v in value]
+    # Keep the tool boundary total for less common psycopg adapters (inet,
+    # ranges, enums) instead of letting boto3 serialization fail later.
+    return str(value)
+
+
 def _cell(name: str, value: Any) -> Any:
     if name in _TRUNCATE_COLS and value is not None:
         return "<vector omitted>"
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).hex()[:_MAX_CELL]
-    if isinstance(value, str) and len(value) > _MAX_CELL:
-        return value[:_MAX_CELL] + "..."
-    return value
+    return _json_ready(value)
 
 
 class ReadOnlySQL:

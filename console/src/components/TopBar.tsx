@@ -29,9 +29,9 @@ export function TopBar() {
       const saved = window.localStorage.getItem("recant.theme");
       if (saved) return saved === "dark";
     } catch {
-      // Use the system setting when storage is unavailable.
+      // Keep the product's light default when storage is unavailable.
     }
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return false;
   });
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";

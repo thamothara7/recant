@@ -36,13 +36,21 @@ def recant_row(event_id=None, incident_id=None, belief_ids=None):
 
 
 class FakeEvents:
-    def __init__(self):
+    def __init__(self, *, failed_entry_count=0):
         self.calls = []
+        self.failed_entry_count = failed_entry_count
 
     def put_events(self, Entries):
         assert len(Entries) <= PUTEVENTS_BATCH
         self.calls.append(Entries)
-        return {"FailedEntryCount": 0}
+        return {
+            "FailedEntryCount": self.failed_entry_count,
+            "Entries": (
+                [{"ErrorCode": "InternalFailure", "ErrorMessage": "try again"}]
+                if self.failed_entry_count
+                else [{} for _ in Entries]
+            ),
+        }
 
 
 def envelope(rows):
@@ -107,3 +115,12 @@ def test_empty_envelope_makes_no_calls():
     result = handler({"body": json.dumps(envelope([]))}, events_client=fake)
     assert json.loads(result["body"]) == {"events": 0, "put_calls": 0}
     assert fake.calls == []
+
+
+def test_partial_putevents_failure_is_not_acknowledged():
+    """PutEvents can return HTTP 200 while rejecting individual entries.
+    The webhook must fail so CockroachDB retries instead of losing the recant."""
+    fake = FakeEvents(failed_entry_count=1)
+    body = json.dumps(envelope([recant_row()]))
+    with pytest.raises(RuntimeError, match="rejected 1"):
+        handler({"body": body}, events_client=fake)

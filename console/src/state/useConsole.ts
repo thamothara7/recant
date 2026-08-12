@@ -146,7 +146,7 @@ interface ConsoleState {
   nextStep: () => void;
   prevStep: () => void;
   toggleAdvanced: () => void;
-  loadBoard: () => Promise<void>;
+  loadBoard: () => Promise<boolean>;
 
   selectBelief: (id: string | null) => void;
   hover: (id: string | null) => void;
@@ -238,7 +238,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   // Fetch the live board once and adopt its seed statuses. On failure the
   // console stays on fixtures with a visible banner rather than a blank board.
   loadBoard: async () => {
-    if (!CONFIG.live) return;
+    if (!CONFIG.live) return true;
     try {
       const board = await fetchBoard();
       const seed = statusesOf(board.beliefs);
@@ -251,8 +251,10 @@ export const useConsole = create<ConsoleState>((set, get) => ({
         // it or the AOST rewind loses its "before" reference.
         liveSeedStatuses: s.liveSeedStatuses ?? seed,
       }));
+      return true;
     } catch (e) {
       set({ boardError: e instanceof Error ? e.message : String(e), boardLoaded: true });
+      return false;
     }
   },
 
@@ -272,7 +274,13 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   },
 
   recant: (sourceId) => {
-    if (get().recanting || get().recantedSource === sourceId) return;
+    // Fixture simulations are one-shot. A live source is deliberately
+    // repeatable because a late-arriving belief can be born suspect after an
+    // earlier recant and must be eligible for another verified closure pass.
+    if (
+      get().recanting ||
+      (!CONFIG.liveRecant && get().recantedSource === sourceId)
+    ) return;
 
     // Live recant: the real serializable transaction on the cluster. The sweep
     // plays while the request is in flight; the board is refetched so the
@@ -289,7 +297,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
             res.primitive ?? `${res.closureSize} rows`,
             `UPDATE beliefs SET status='quarantined' WHERE belief_id = ANY($1) -- ${res.closureSize} rows`,
           );
-          await get().loadBoard();
+          const refreshed = await get().loadBoard();
           const event: ChangefeedEvent = {
             id: evtId++,
             at: nowClock(),
@@ -298,7 +306,27 @@ export const useConsole = create<ConsoleState>((set, get) => ({
           };
           const flipped = new Set(res.newlyFlipped);
           set((s) => ({
-            statuses: statusesOf(s.board.beliefs),
+            // A committed recant must remain visible even if the follow-up
+            // board refresh fails. Patch the last known snapshot from the
+            // authoritative receipt, then let a later refresh reconcile it.
+            board: refreshed
+              ? s.board
+              : {
+                  ...s.board,
+                  beliefs: s.board.beliefs.map((belief) =>
+                    flipped.has(belief.id)
+                      ? { ...belief, status: "quarantined" as const }
+                      : belief,
+                  ),
+                },
+            statuses: refreshed
+              ? statusesOf(s.board.beliefs)
+              : Object.fromEntries(
+                  s.board.beliefs.map((belief) => [
+                    belief.id,
+                    flipped.has(belief.id) ? "quarantined" : (s.statuses[belief.id] ?? belief.status),
+                  ]),
+                ),
             ticker: [event, ...s.liveTicker].slice(0, 40),
             liveTicker: [event, ...s.liveTicker].slice(0, 40),
             recanting: false,

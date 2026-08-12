@@ -83,20 +83,21 @@ def _knn_query(
     conn: psycopg.Connection,
     probe_embedding_text: str,
     k: int,
-) -> list[tuple[UUID, str, datetime, float]]:
+) -> list[tuple[UUID, str, datetime, UUID | None, float]]:
     """Top-K by cosine distance. Deliberately no WHERE clause: the bare
     ORDER BY + LIMIT shape is what the vector index serves (design section 1);
     every filter happens in the caller."""
     rows = conn.execute(
         """
-        SELECT belief_id, status, created_at, embedding <=> %s::vector AS dist
+        SELECT belief_id, status, created_at, source_id,
+               embedding <=> %s::vector AS dist
         FROM beliefs
         ORDER BY embedding <=> %s::vector
         LIMIT %s
         """,
         (probe_embedding_text, probe_embedding_text, k),
     ).fetchall()
-    return [(r[0], r[1], r[2], float(r[3])) for r in rows if r[3] is not None]
+    return [(r[0], r[1], r[2], r[3], float(r[4])) for r in rows if r[4] is not None]
 
 
 def _knn_hits(
@@ -106,7 +107,7 @@ def _knn_hits(
     top_k: int,
     max_k: int,
     threshold: float,
-) -> tuple[list[tuple[UUID, str, datetime, float]], bool]:
+) -> tuple[list[tuple[UUID, str, datetime, UUID | None, float]], bool]:
     """Adaptive K: post-LIMIT filtering must not cap recall. If the farthest
     returned neighbor still clears the threshold, there may be more beyond it —
     double K and retry, bounded by max_k. Returns (hits, truncated): truncated
@@ -115,7 +116,7 @@ def _knn_hits(
     while True:
         hits = _knn_query(conn, probe_embedding_text, k)
         exhausted = len(hits) < k
-        boundary_hot = bool(hits) and (1.0 - hits[-1][3]) >= threshold
+        boundary_hot = bool(hits) and (1.0 - hits[-1][4]) >= threshold
         if exhausted or not boundary_hot:
             return hits, False
         if k >= max_k:
@@ -192,13 +193,19 @@ def compute_closure(
                 )
                 if truncated:
                     knn_truncated = True
-                for hit_id, status, created_at, dist in hits:
+                for hit_id, status, created_at, hit_source_id, dist in hits:
                     similarity = 1.0 - dist
                     if (
                         hit_id == probe_id
                         or hit_id in closure
                         or similarity < threshold
                         or status not in _TAINTABLE
+                        # Vector inference finds unattributed copies. A belief
+                        # with its own recorded source has independent
+                        # provenance and must not be overridden by topical
+                        # similarity alone (for example, a trusted 30-day
+                        # policy beside a poisoned 365-day claim).
+                        or hit_source_id is not None
                         or (window_start is not None and created_at < window_start)
                     ):
                         continue

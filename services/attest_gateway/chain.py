@@ -49,6 +49,7 @@ class ChainRecord:
     source_id: UUID | None
     parent_ids: list[UUID]
     ts: datetime
+    prev_hash: bytes
     hash: bytes
 
 
@@ -59,6 +60,11 @@ def verify_chain(records: list[ChainRecord]) -> tuple[bool, int]:
     """
     prev = GENESIS
     for i, r in enumerate(records):
+        # prev_hash is persisted as evidence and returned by the APIs. Checking
+        # only the recomputed chain would let that stored link be corrupted
+        # while verification still reported the record as valid.
+        if r.prev_hash != prev:
+            return False, i
         payload = canonical_payload(
             agent_id=r.agent_id,
             seq=r.seq,

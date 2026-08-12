@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { fetchPreview } from "../lib/api";
+import { fetchPreview, type PreviewResult } from "../lib/api";
 import { CONFIG } from "../lib/config";
 import { closureOverBoard, useActiveBoard, useConsole } from "../state/useConsole";
 import { Icon } from "./m3";
@@ -10,13 +10,14 @@ import { Icon } from "./m3";
 // confirmation was beginner-hostile; the blast radius is still named exactly.)
 export function RecantDialog({ sourceId }: { sourceId: string }) {
   const [open, setOpen] = useState(false);
-  const [liveClosure, setLiveClosure] = useState<string[] | null>(null);
+  const [livePreview, setLivePreview] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const board = useActiveBoard();
   const recant = useConsole((s) => s.recant);
-  const already = useConsole((s) => s.recantedSource === sourceId);
+  const statuses = useConsole((s) => s.statuses);
+  const recantedInSession = useConsole((s) => s.recantedSource === sourceId);
 
   // In live mode the client can only see explicit edges before the recant, so
   // ask the taint engine for the real closure (incl. vector-inferred copies)
@@ -24,18 +25,18 @@ export function RecantDialog({ sourceId }: { sourceId: string }) {
   // partial blast radius.
   useEffect(() => {
     if (!open || !CONFIG.liveRecant) {
-      setLiveClosure(null);
+      setLivePreview(null);
       setPreviewLoading(false);
       setPreviewError(null);
       return;
     }
     let cancelled = false;
-    setLiveClosure(null);
+    setLivePreview(null);
     setPreviewError(null);
     setPreviewLoading(true);
     fetchPreview(sourceId)
       .then((preview) => {
-        if (!cancelled) setLiveClosure(preview.closureIds);
+        if (!cancelled) setLivePreview(preview);
       })
       .catch((error) => {
         if (!cancelled) {
@@ -53,10 +54,20 @@ export function RecantDialog({ sourceId }: { sourceId: string }) {
   const agentName = (id: string) => board.agents.find((a) => a.id === id)?.name ?? id;
   const src = board.sources.find((s) => s.id === sourceId);
   const clientClosure = closureOverBoard(board, sourceId);
-  const closure = liveClosure ?? clientClosure;
+  const closure = livePreview?.closureIds ?? clientClosure;
   const affected = board.beliefs.filter((b) => closure.includes(b.id));
   const bots = new Set(affected.map((b) => b.agentId));
-  const previewReady = !CONFIG.liveRecant || liveClosure !== null;
+  const clientWouldFlip = affected.filter((belief) => {
+    const status = statuses[belief.id] ?? belief.status;
+    return status === "active" || status === "suspect";
+  }).length;
+  const wouldFlip = livePreview?.wouldFlip ?? clientWouldFlip;
+  const agentCount = livePreview?.agentCount ?? bots.size;
+  const previewReady = !CONFIG.liveRecant || livePreview !== null;
+  // Live recants are repeatable because new suspect beliefs may arrive later.
+  // The authoritative preview, not an old browser-session flag, decides
+  // whether this pass has any work to do.
+  const already = !CONFIG.liveRecant && recantedInSession;
   if (!src) return null;
 
   return (
@@ -74,7 +85,11 @@ export function RecantDialog({ sourceId }: { sourceId: string }) {
           }`}
         >
           <Icon name={already ? "check_circle" : "block"} size={18} />
-          {already ? "Already taken back" : "Take back everything from this source"}
+          {already
+            ? "Already taken back"
+            : recantedInSession
+              ? "Check this source again"
+              : "Take back everything from this source"}
         </button>
       </Dialog.Trigger>
 
@@ -95,13 +110,15 @@ export function RecantDialog({ sourceId }: { sourceId: string }) {
           <Dialog.Description className="mt-2 text-body-md text-on-surface-variant">
             {previewLoading ? (
               "Checking every linked and reworded memory before you continue."
+            ) : previewReady && wouldFlip === 0 ? (
+              "This source is already contained. The server found no active or flagged memories left to block."
             ) : (
               <>
-                Recant will block{" "}
+                Recant will newly block{" "}
                 <span className="font-medium text-on-surface">
-                  {closure.length} memories across {bots.size} bots
+                  {wouldFlip} memories across {agentCount} bots
                 </span>{" "}
-                at the same time, including reworded copies that never linked back to the source.
+                in a closure of {closure.length}, including reworded copies that never linked back to the source.
               </>
             )}
           </Dialog.Description>
@@ -161,14 +178,18 @@ export function RecantDialog({ sourceId }: { sourceId: string }) {
             {/* Verb-phrase label (no "Yes," prefix); tonal error keeps the
                 destructive weight without a filled button inside a dialog. */}
             <button
-              disabled={!previewReady || previewLoading}
+              disabled={!previewReady || previewLoading || wouldFlip === 0}
               onClick={() => {
                 recant(sourceId);
                 setOpen(false);
               }}
               className="state-layer inline-flex h-10 items-center justify-center gap-2 rounded-full bg-error-container px-6 text-label-lg font-medium text-on-error-container disabled:pointer-events-none disabled:opacity-40"
             >
-              {previewLoading ? "Checking memories" : `Block ${closure.length} memories`}
+              {previewLoading
+                ? "Checking memories"
+                : wouldFlip === 0
+                  ? "Already contained"
+                  : `Block ${wouldFlip} memories`}
             </button>
           </div>
         </Dialog.Content>

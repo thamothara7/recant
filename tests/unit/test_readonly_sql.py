@@ -2,6 +2,11 @@
 only single read statements pass validation, the executor issues SET TRANSACTION
 READ ONLY, and wide/opaque columns are truncated. No database: a fake connection."""
 
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+from uuid import uuid4
+
 import pytest
 
 from agent.readonly_sql import ReadOnlySQL, UnsafeQuery, validate
@@ -99,6 +104,26 @@ def test_execute_flags_truncation_at_row_cap():
     out = tool.run("SELECT n FROM generate_series(1,50) n")
     assert len(out["rows"]) == 5
     assert out["truncated"] is True
+
+
+def test_execute_returns_json_ready_database_values():
+    belief_id = uuid4()
+    created_at = datetime(2026, 8, 12, 9, 30, tzinfo=timezone.utc)
+    fake = _FakeConn(
+        ["belief_id", "created_at", "score", "parents"],
+        [(belief_id, created_at, Decimal("0.91"), [belief_id])],
+    )
+    out = ReadOnlySQL(conn_factory=lambda: fake).run("SELECT forensic values")
+
+    # Bedrock's tool-result document accepts JSON values, not psycopg's UUID,
+    # datetime, Decimal, or arrays containing those objects.
+    json.dumps(out, allow_nan=False)
+    assert out["rows"][0] == {
+        "belief_id": str(belief_id),
+        "created_at": created_at.isoformat(),
+        "score": "0.91",
+        "parents": [str(belief_id)],
+    }
 
 
 def test_run_rejects_write_before_touching_db():

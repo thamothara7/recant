@@ -27,12 +27,40 @@ from services.attest_gateway.models import (
 from services.attest_gateway.signer import dev_signer_for, verify_signature
 from services.common.config import cors_origins
 from services.common.db import run_txn
+from services.common.embedder import Embedder, select_embedder
 from services.common.vectors import to_vector_literal
 
 # Env-configurable: TTL deletes are blocked by derivation FKs anyway (rows
 # persist, job errors — README failure-modes table), and the deployed demo must
 # outlive the judging window, so W6 sets this to 90 (design review 2026-07-03).
 UNTRUSTED_TTL = timedelta(days=float(os.environ.get("RECANT_UNTRUSTED_TTL_DAYS", "7")))
+
+_embedder: Embedder | None = None
+
+
+def _content_embedding(content: str) -> list[float]:
+    """Embed an omitted vector once, before the database transaction starts.
+
+    Keeping provider I/O outside the serializable retry loop avoids repeating a
+    Bedrock call after a 40001. The selected embedder is reused so a Titan client
+    and its HTTP connection pool survive across requests.
+    """
+    global _embedder
+    if _embedder is None:
+        try:
+            _embedder = select_embedder()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=503, detail="embedding configuration is invalid"
+            ) from exc
+    try:
+        return _embedder.embed(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail="embedding provider unavailable"
+        ) from exc
 
 app = FastAPI(title="recant attest-gateway")
 
@@ -99,6 +127,7 @@ def create_source(body: SourceIn) -> SourceOut:
 @app.post("/beliefs", response_model=BeliefOut, status_code=201)
 def create_belief(body: BeliefIn) -> BeliefOut:
     parent_ids = list(dict.fromkeys(body.parent_ids))
+    embedding = body.embedding if body.embedding is not None else _content_embedding(body.content)
 
     def txn(conn: psycopg.Connection) -> BeliefOut:
         # One clock domain: stamp created_at from the DATABASE clock, same source
@@ -156,7 +185,7 @@ def create_belief(body: BeliefIn) -> BeliefOut:
         )
         h = chain.chain_hash(prev, payload)
         sig = dev_signer_for(name).sign(h)
-        emb = to_vector_literal(body.embedding) if body.embedding is not None else None
+        emb = to_vector_literal(embedding)
 
         belief_id = conn.execute(
             """
@@ -209,7 +238,8 @@ def verify_agent_chain(agent_id: UUID) -> ChainVerification:
             raise HTTPException(status_code=404, detail="unknown agent")
         rows = conn.execute(
             """
-            SELECT b.seq, b.content, b.source_id, b.created_at, b.hash, b.sig,
+            SELECT b.seq, b.content, b.source_id, b.created_at, b.prev_hash,
+                   b.hash, b.sig,
                    (SELECT array_agg(d.parent_id) FROM derivations d
                     WHERE d.child_id = b.belief_id AND d.kind = 'explicit')
             FROM beliefs b
@@ -232,13 +262,14 @@ def verify_agent_chain(agent_id: UUID) -> ChainVerification:
             seq=r[0],
             content=r[1],
             source_id=r[2],
-            parent_ids=list(r[6] or []),
+            parent_ids=list(r[7] or []),
             ts=r[3],
-            hash=bytes(r[4]),
+            prev_hash=bytes(r[4]),
+            hash=bytes(r[5]),
         )
         for r in rows
     ]
-    sigs = [bytes(r[5]) for r in rows]
+    sigs = [bytes(r[6]) for r in rows]
 
     valid, bad = chain.verify_chain(records)
     reason: str | None = None
@@ -261,7 +292,7 @@ def verify_agent_chain(agent_id: UUID) -> ChainVerification:
                 valid = False
                 reason = "truncated"
                 first_invalid_seq = head_seq
-        elif head_seq != 0:
+        elif head_seq != 0 or head_hash is not None:
             valid = False
             reason = "truncated"
             first_invalid_seq = head_seq

@@ -158,6 +158,45 @@ def test_implicit_closure_catches_paraphrase_and_materializes_edge(fx, qs):
     assert score == pytest.approx(0.9, abs=0.01)
 
 
+def test_omitted_embeddings_are_generated_for_semantic_closure(fx, qs):
+    """The public client omits embeddings by default. The gateway must embed
+    those writes or Recant silently loses its reworded-copy guarantee."""
+    poison = fx.belief(
+        "researcher", "the refund window is 365 days", source="forum"
+    )
+    paraphrase = fx.belief(
+        "support", "the refund window is now 365 days for everyone"
+    )
+
+    out = qs.post(
+        "/taint/preview", json={"source_id": fx.sources["forum"]}
+    ).json()
+    assert poison["belief_id"] in out["closure_ids"]
+    assert paraphrase["belief_id"] in out["closure_ids"]
+    assert out["would_flip"] == 2
+
+
+def test_semantic_inference_does_not_override_independent_source(fx, qs):
+    from services.common.embedder import HashEmbedder, cosine
+
+    poisoned_text = "the refund window is 365 days"
+    trusted_text = "the refund window is 30 days"
+    assert cosine(
+        HashEmbedder().embed(poisoned_text), HashEmbedder().embed(trusted_text)
+    ) >= float(THRESHOLD)
+
+    fx.belief("researcher", poisoned_text, source="forum")
+    trusted = fx.belief(
+        "support", trusted_text, source="vendor"
+    )
+
+    out = qs.post(
+        "/taint/preview", json={"source_id": fx.sources["forum"]}
+    ).json()
+    assert trusted["belief_id"] not in out["closure_ids"]
+    assert out["would_flip"] == 1
+
+
 def test_transitive_closure_through_inferred_member(fx, qs):
     poison = fx.belief("researcher", "poisoned claim", source="forum", embedding=axis(0))
     paraphrase = fx.belief("support", "reworded claim", embedding=mix(0, 1, 0.9))
