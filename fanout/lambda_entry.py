@@ -11,6 +11,8 @@ client, so the unit suite runs with no AWS SDK or credentials.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 from uuid import UUID
@@ -20,6 +22,17 @@ from fanout.handler import MalformedEvent, RecantEvent, parse_event
 EVENT_SOURCE = "recant.fanout"
 EVENT_DETAIL_TYPE = "recant"
 PUTEVENTS_BATCH = 10  # EventBridge PutEvents hard limit per call
+MAX_ENTRY_BYTES = int(os.environ.get("RECANT_EVENTBRIDGE_MAX_ENTRY_BYTES", "240000"))
+
+
+def _authorized(event: dict) -> bool:
+    """Verify CockroachDB's configured Basic authorization header by digest."""
+    expected = os.environ.get("RECANT_WEBHOOK_AUTH_SHA256")
+    if not expected:
+        return os.environ.get("RECANT_ENV", "").strip().lower() != "production"
+    headers = {str(key).lower(): str(value) for key, value in (event.get("headers") or {}).items()}
+    supplied = headers.get("authorization", "")
+    return hmac.compare_digest(hashlib.sha256(supplied.encode()).hexdigest(), expected)
 
 
 def parse_webhook_envelope(body: dict) -> list[RecantEvent]:
@@ -49,36 +62,86 @@ def parse_webhook_envelope(body: dict) -> list[RecantEvent]:
     return events
 
 
-def to_entries(events: list[RecantEvent], *, bus_name: str) -> list[dict]:
-    return [
-        {
-            "Source": EVENT_SOURCE,
-            "DetailType": EVENT_DETAIL_TYPE,
-            "EventBusName": bus_name,
-            "Detail": json.dumps(
+def to_entries(events: list[RecantEvent], *, bus_name: str, manifest_client=None) -> list[dict]:
+    entries: list[dict] = []
+    for event in events:
+        detail = json.dumps(
+            {
+                "event_id": str(event.event_id),
+                "incident_id": str(event.incident_id),
+                "source_id": str(event.source_id),
+                "tenant_id": str(event.tenant_id),
+                "actor": event.actor,
+                "evictions": [
+                    {
+                        "agent_id": str(eviction.agent_id),
+                        "belief_ids": [str(belief_id) for belief_id in eviction.belief_ids],
+                    }
+                    for eviction in event.evictions
+                ],
+            }
+        )
+        if len(detail.encode("utf-8")) > MAX_ENTRY_BYTES:
+            bucket = os.environ.get("RECANT_EVENT_MANIFEST_BUCKET")
+            if not bucket:
+                raise ValueError(
+                    f"recant event {event.event_id} is {len(detail.encode('utf-8'))} bytes; "
+                    "set RECANT_EVENT_MANIFEST_BUCKET for oversized fanout"
+                )
+            if manifest_client is None:  # pragma: no cover - exercised against AWS
+                import boto3
+
+                manifest_client = boto3.client("s3")
+            raw = detail.encode("utf-8")
+            digest = hashlib.sha256(raw).hexdigest()
+            key = f"fanout/{event.tenant_id}/{event.event_id}.json"
+            manifest_client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=raw,
+                ContentType="application/json",
+                ServerSideEncryption="AES256",
+            )
+            detail = json.dumps(
                 {
-                    "event_id": str(e.event_id),
-                    "incident_id": str(e.incident_id),
-                    "source_id": str(e.source_id),
-                    "actor": e.actor,
-                    "evictions": [
-                        {"agent_id": str(ev.agent_id), "belief_ids": [str(b) for b in ev.belief_ids]}
-                        for ev in e.evictions
-                    ],
+                    "event_id": str(event.event_id),
+                    "manifest": {
+                        "bucket": bucket,
+                        "key": key,
+                        "sha256": digest,
+                    },
                 }
-            ),
-        }
-        for e in events
-    ]
+            )
+        entries.append(
+            {
+                "Source": EVENT_SOURCE,
+                "DetailType": EVENT_DETAIL_TYPE,
+                "EventBusName": bus_name,
+                "Detail": detail,
+            }
+        )
+    return entries
 
 
-def handler(event: dict, context: object = None, *, events_client=None) -> dict:
+def handler(
+    event: dict,
+    context: object = None,
+    *,
+    events_client=None,
+    manifest_client=None,
+) -> dict:
     """Lambda Function URL handler: webhook envelope in, PutEvents out.
 
     events_client is injected by tests; production constructs boto3 lazily.
     Returns 200 with counts on success; a MalformedEvent propagates as 500 so
     the changefeed retries and the lag is visible instead of swallowed.
     """
+    if not _authorized(event):
+        return {
+            "statusCode": 401,
+            "headers": {"WWW-Authenticate": 'Basic realm="recant-changefeed"'},
+            "body": json.dumps({"detail": "invalid webhook authorization"}),
+        }
     body = event.get("body") or "{}"
     if event.get("isBase64Encoded"):  # Function URLs base64 bodies they read as binary
         import base64
@@ -92,7 +155,11 @@ def handler(event: dict, context: object = None, *, events_client=None) -> dict:
     except MalformedEvent:
         raise
 
-    entries = to_entries(events, bus_name=os.environ.get("RECANT_EVENT_BUS", "recant"))
+    entries = to_entries(
+        events,
+        bus_name=os.environ.get("RECANT_EVENT_BUS", "recant"),
+        manifest_client=manifest_client,
+    )
     if entries and events_client is None:  # pragma: no cover - exercised under U3
         import boto3
 
@@ -114,8 +181,6 @@ def handler(event: dict, context: object = None, *, events_client=None) -> dict:
                 if item.get("ErrorCode")
             ]
             detail = ", ".join(errors) if errors else "unknown error"
-            raise RuntimeError(
-                f"EventBridge rejected {failed} of {len(batch)} entries: {detail}"
-            )
+            raise RuntimeError(f"EventBridge rejected {failed} of {len(batch)} entries: {detail}")
 
     return {"statusCode": 200, "body": json.dumps({"events": len(events), "put_calls": put_calls})}

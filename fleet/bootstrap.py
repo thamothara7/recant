@@ -25,17 +25,17 @@ from functools import lru_cache
 from uuid import UUID
 
 import psycopg
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import NullPool
-
 from langchain_cockroachdb import (
     CockroachDBChatMessageHistory,
     CockroachDBEngine,
     CockroachDBVectorStore,
     DistanceStrategy,
 )
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from fleet.embeddings import LangChainEmbedder
+from services.common.auth import DEFAULT_TENANT_ID
 from services.common.embedder import DIMENSIONS
 
 TABLE = "agent_memory"
@@ -44,6 +44,21 @@ INDEX_DDL = (
     f"CREATE VECTOR INDEX IF NOT EXISTS {TABLE}_embedding_idx"
     f" ON {TABLE} ({NAMESPACE_COLUMN}, embedding vector_cosine_ops)"
 )
+TENANT_POLICY_DDL = (
+    f"CREATE POLICY IF NOT EXISTS {TABLE}_tenant_policy ON {TABLE} FOR ALL TO PUBLIC"
+    " USING (current_user() = 'recant_t_' ||"
+    " replace(metadata->>'tenant_id', '-', ''))"
+    " WITH CHECK (current_user() = 'recant_t_' ||"
+    " replace(metadata->>'tenant_id', '-', ''))"
+)
+
+
+def runtime_tenant_id() -> UUID:
+    raw = os.environ.get("RECANT_TENANT_ID")
+    try:
+        return UUID(raw) if raw else DEFAULT_TENANT_ID
+    except ValueError as exc:
+        raise RuntimeError("RECANT_TENANT_ID must be a UUID") from exc
 
 
 def engine_url(database_url: str | None = None) -> str:
@@ -62,10 +77,12 @@ def get_engine() -> CockroachDBEngine:
 
 
 def ensure_agent_memory() -> None:
-    """Idempotent: package-owned table plus our cosine vector index."""
+    """Idempotent package table, cosine index, and metadata-backed tenant RLS."""
     get_engine().init_vectorstore_table(TABLE, DIMENSIONS, namespace_column=NAMESPACE_COLUMN)
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         conn.execute(INDEX_DDL)
+        conn.execute(f"ALTER TABLE {TABLE} ENABLE ROW LEVEL SECURITY")
+        conn.execute(TENANT_POLICY_DDL)
 
 
 def store_for(agent_id: UUID | str) -> CockroachDBVectorStore:
@@ -97,5 +114,6 @@ def reset_runtime() -> None:
         for table in ("fanout_deliveries", "agent_actions"):
             conn.execute(f"DELETE FROM {table}")
         for table in (TABLE, "message_store"):
-            if conn.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0]:
+            table_row = conn.execute("SELECT to_regclass(%s)", (table,)).fetchone()
+            if table_row is not None and table_row[0]:
                 conn.execute(f"DELETE FROM {table}")

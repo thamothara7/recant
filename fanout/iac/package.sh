@@ -23,7 +23,7 @@ cp fanout/__init__.py fanout/handler.py fanout/lambda_entry.py "$BUILD/receiver/
 # typing_extensions pinned explicitly: psycopg's _compat imports it on
 # py<3.13 but pip's cross-platform resolve skipped the marker (seen live:
 # Lambda ModuleNotFoundError). It is a pure-python wheel; harmless to force.
-uv run pip install "psycopg[binary]>=3.2" "typing_extensions>=4.6" \
+uv run pip install "psycopg[binary]==3.3.4" "typing_extensions==4.16.0" \
   --platform manylinux2014_aarch64 \
   --python-version 3.12 \
   --implementation cp \

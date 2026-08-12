@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { INCIDENT } from "../data/fixtures";
-import type { Belief, Source } from "../data/types";
+import type { ActionDecision, Belief, Source } from "../data/types";
 import type { Board } from "../lib/api";
 import { HashChip } from "./HashChip";
 import { StatusBadge } from "./StatusBadge";
@@ -9,6 +9,7 @@ import { STATUS_EXPLAIN, TRUST_META, clockUtc } from "../lib/format";
 import {
   closureOverBoard,
   useActiveBoard,
+  useActiveDecisions,
   useConsole,
   useDisplayStatuses,
 } from "../state/useConsole";
@@ -30,6 +31,7 @@ export function Inspector() {
   const selectedBelief = useConsole((s) => s.selectedBelief);
   const selectedSource = useConsole((s) => s.selectedSource);
   const statuses = useDisplayStatuses();
+  const decisions = useActiveDecisions();
 
   const belief = selectedBelief ? board.beliefs.find((b) => b.id === selectedBelief) : null;
 
@@ -43,7 +45,12 @@ export function Inspector() {
 
       <div className="flex-1">
         {belief ? (
-          <BeliefInspector board={board} belief={belief} status={statuses[belief.id] ?? belief.status} />
+          <BeliefInspector
+            board={board}
+            belief={belief}
+            status={statuses[belief.id] ?? belief.status}
+            decision={decisions.find((item) => item.supportBeliefIds.includes(belief.id))}
+          />
         ) : selectedSource ? (
           <SourceInspector board={board} sourceId={selectedSource} />
         ) : (
@@ -101,13 +108,17 @@ function BeliefInspector({
   board,
   belief,
   status,
+  decision,
 }: {
   board: Board;
   belief: Belief;
   status: Belief["status"];
+  decision?: ActionDecision;
 }) {
   const advanced = useConsole((s) => s.advanced);
   const agentName = (id: string) => board.agents.find((a) => a.id === id)?.name ?? id;
+  const signingAlgorithm =
+    board.agents.find((agent) => agent.id === belief.agentId)?.signingAlgorithm ?? "unknown";
   const beliefById = (id: string) => board.beliefs.find((b) => b.id === id);
   const src = belief.sourceId ? board.sources.find((s) => s.id === belief.sourceId) : null;
   const parents = board.derivations.filter((d) => d.childId === belief.id);
@@ -147,7 +158,10 @@ function BeliefInspector({
             title={`Saved and signed by the ${agentName(belief.agentId)}`}
             detail={
               advanced ? (
-                <HashChip hash={belief.sig.replace("\u2026", belief.hash.slice(8, 24))} label="ed25519" />
+                <HashChip
+                  hash={belief.sig.replace("\u2026", belief.hash.slice(8, 24))}
+                  label={signingAlgorithm}
+                />
               ) : (
                 "the signature proves nobody edited it afterwards"
               )
@@ -196,6 +210,12 @@ function BeliefInspector({
         </Section>
       )}
 
+      {decision && (
+        <Section label="Action check">
+          <ActionDecisionPanel decision={decision} />
+        </Section>
+      )}
+
       {advanced && (
         <Section label="Technical record">
           <Field label="Hash">
@@ -217,6 +237,86 @@ function BeliefInspector({
         <Section>
           <IncidentPanel source={incidentSource} />
         </Section>
+      )}
+    </div>
+  );
+}
+
+const DECISION_META: Record<
+  ActionDecision["decision"],
+  { label: string; icon: string; container: string; onContainer: string; title: string }
+> = {
+  allow: {
+    label: "Allowed",
+    icon: "verified_user",
+    container: "var(--md-success-container)",
+    onContainer: "var(--md-on-success-container)",
+    title: "This action has a valid memory permit",
+  },
+  confirm: {
+    label: "Needs confirmation",
+    icon: "person_check",
+    container: "var(--md-warning-container)",
+    onContainer: "var(--md-on-warning-container)",
+    title: "The action is paused for an operator",
+  },
+  deny: {
+    label: "Denied",
+    icon: "gpp_bad",
+    container: "var(--md-error-container)",
+    onContainer: "var(--md-on-error-container)",
+    title: "The action cannot run",
+  },
+};
+
+function ActionDecisionPanel({ decision }: { decision: ActionDecision }) {
+  const advanced = useConsole((state) => state.advanced);
+  const meta = DECISION_META[decision.decision];
+  return (
+    <div className="rounded-md3-md bg-surface-container-low p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full"
+            style={{ background: meta.container, color: meta.onContainer }}
+          >
+            <Icon name={meta.icon} size={18} fill />
+          </span>
+          <div>
+            <p className="text-title-sm font-medium text-on-surface">{meta.title}</p>
+            <p className="text-body-sm text-on-surface-variant">Tool: {decision.toolName}</p>
+          </div>
+        </div>
+        <Chip
+          icon={meta.icon}
+          label={meta.label}
+          container={meta.container}
+          onContainer={meta.onContainer}
+        />
+      </div>
+      <p className="mt-3 text-body-md text-on-surface">{decision.reason}</p>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-md3-sm bg-surface-container-high p-2">
+          <div className="text-label-md font-medium text-on-surface-variant">Memory proof</div>
+          <div className="mt-0.5 text-body-sm text-on-surface">{decision.observedAuthorityLabel}</div>
+        </div>
+        <div className="rounded-md3-sm bg-surface-container-high p-2">
+          <div className="text-label-md font-medium text-on-surface-variant">Policy needs</div>
+          <div className="mt-0.5 text-body-sm text-on-surface">{decision.requiredAuthorityLabel}</div>
+        </div>
+      </div>
+      {advanced && (
+        <div className="mt-3 border-t border-outline-variant pt-2">
+          <Field label="Decision">
+            <HashChip hash={decision.id} />
+          </Field>
+          <Field label="Policy">
+            <span className="mono text-body-sm">{decision.policyVersion}</span>
+          </Field>
+          <Field label="Signed">
+            <HashChip hash={decision.signature} />
+          </Field>
+        </div>
       )}
     </div>
   );

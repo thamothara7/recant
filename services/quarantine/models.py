@@ -7,6 +7,9 @@ class InferredEdgeOut(BaseModel):
     child_id: UUID
     parent_id: UUID
     score: float
+    evidence_method: str = "vector_similarity"
+    evidence_model: str | None = None
+    evidence_version: str = "v1"
 
 
 class RecantIn(BaseModel):

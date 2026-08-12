@@ -1,5 +1,6 @@
 import type {
   Agent,
+  ActionDecision,
   Belief,
   ChangefeedEvent,
   ClusterNode,
@@ -16,9 +17,9 @@ import type {
 // "agent"; sources carry human labels; jargon lives behind the Advanced toggle.
 
 export const AGENTS: Agent[] = [
-  { id: "researcher", name: "Research bot", role: "Reads vendor docs and web sources", region: "us-east", pubkey8: "a19f3c7d" },
-  { id: "support", name: "Support bot", role: "Answers customer refund questions", region: "us-east", pubkey8: "6b02e4aa" },
-  { id: "ops", name: "Ops bot", role: "Auto-processes refund payments", region: "us-west", pubkey8: "d4f1902c" },
+  { id: "researcher", name: "Research bot", role: "Reads vendor docs and web sources", region: "us-east", pubkey8: "a19f3c7d", signingAlgorithm: "ed25519" },
+  { id: "support", name: "Support bot", role: "Answers customer refund questions", region: "us-east", pubkey8: "6b02e4aa", signingAlgorithm: "ed25519" },
+  { id: "ops", name: "Ops bot", role: "Auto-processes refund payments", region: "us-west", pubkey8: "d4f1902c", signingAlgorithm: "ed25519" },
 ];
 
 export const SOURCES: Source[] = [
@@ -86,6 +87,25 @@ export const INCIDENT: Incident = {
   summary:
     "On Jul 2, Research bot ingested a forum post claiming 365-day refund windows. Support bot paraphrased this into its own memory with no link back. Ops bot queued a $4,471 refund based on the bad policy. Recant caught all 3 copies and stopped the payment.",
 };
+
+export const ACTION_DECISIONS: ActionDecision[] = [
+  {
+    id: "dec_refund_4471",
+    agentId: "ops",
+    toolName: "refund",
+    supportBeliefIds: ["bel_ops_action", "bel_support_paraphrase"],
+    riskClass: "effect",
+    requiredAuthority: 70,
+    requiredAuthorityLabel: "user confirmed",
+    observedAuthority: 10,
+    observedAuthorityLabel: "external",
+    decision: "confirm",
+    reason: "This refund rests on an external claim. An operator must confirm it before payment.",
+    policyVersion: "builtin-v1",
+    createdAt: T("35:32.004"),
+    signature: H("d09a74b2"),
+  },
+];
 
 export const CLUSTER: ClusterNode[] = [
   { id: "n1", region: "us-east-1a", up: true },

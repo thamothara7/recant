@@ -15,6 +15,7 @@ export interface Agent {
   role: string;
   region: string;
   pubkey8: string; // truncated hex, display only
+  signingAlgorithm: string;
 }
 
 export interface Source {
@@ -23,6 +24,8 @@ export interface Source {
   label: string;
   uri: string;
   trust: TrustTier;
+  authorityRank?: number;
+  issuer?: string;
 }
 
 export interface Belief {
@@ -37,6 +40,8 @@ export interface Belief {
   sig: string;
   createdAt: string; // ISO UTC
   region: string;
+  authorityRank?: number;
+  originSourceIds?: string[];
 }
 
 export interface Derivation {
@@ -44,6 +49,7 @@ export interface Derivation {
   parentId: string;
   kind: DerivationKind;
   score: number; // 1.0 for explicit; cosine similarity for inferred
+  evidenceMethod?: string;
 }
 
 export interface Incident {
@@ -51,6 +57,23 @@ export interface Incident {
   sourceId: string;
   openedBy: string;
   summary: string;
+}
+
+export interface ActionDecision {
+  id: string;
+  agentId: AgentId;
+  toolName: string;
+  supportBeliefIds: string[];
+  riskClass: string;
+  requiredAuthority: number;
+  requiredAuthorityLabel: string;
+  observedAuthority: number;
+  observedAuthorityLabel: string;
+  decision: "allow" | "confirm" | "deny";
+  reason: string;
+  policyVersion: string;
+  createdAt: string;
+  signature: string;
 }
 
 // Judge Overlay chip: flashed when a backend response carries X-Recant-Primitive.

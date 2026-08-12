@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -33,15 +33,26 @@ class GatewayClient:
         base = os.environ.get("RECANT_GATEWAY_URL", "http://localhost:8000")
         self.http = client if client is not None else httpx.Client(base_url=base, timeout=10)
 
+    def _headers(self) -> dict[str, str]:
+        headers = {"Idempotency-Key": f"fleet-{uuid4()}"}
+        token = os.environ.get("RECANT_API_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
     def create_agent(self, name: str) -> UUID:
-        r = self.http.post("/agents", json={"name": name})
+        r = self.http.post("/agents", json={"name": name}, headers=self._headers())
         if r.status_code == 409:
             raise AlreadySeeded(f"agent {name} already exists; run against a clean database")
         r.raise_for_status()
         return UUID(r.json()["agent_id"])
 
     def create_source(self, kind: str, uri: str, trust_tier: str) -> UUID:
-        r = self.http.post("/sources", json={"kind": kind, "uri": uri, "trust_tier": trust_tier})
+        r = self.http.post(
+            "/sources",
+            json={"kind": kind, "uri": uri, "trust_tier": trust_tier},
+            headers=self._headers(),
+        )
         r.raise_for_status()
         return UUID(r.json()["source_id"])
 
@@ -63,6 +74,7 @@ class GatewayClient:
                 "parent_ids": [str(p) for p in (parent_ids or [])],
                 "embedding": embedding,
             },
+            headers=self._headers(),
         )
         r.raise_for_status()
         body = r.json()

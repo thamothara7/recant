@@ -40,7 +40,9 @@ def _handler(request: httpx.Request) -> httpx.Response:
             },
         )
     if method == "POST" and path == "/taint/preview":
-        return httpx.Response(200, json={"closure_ids": [BELIEF], "would_flip": 1, "agent_ids": [AGENT]})
+        return httpx.Response(
+            200, json={"closure_ids": [BELIEF], "would_flip": 1, "agent_ids": [AGENT]}
+        )
     if method == "GET" and path == f"/agents/{AGENT}/chain/verify":
         return httpx.Response(200, json={"valid": True, "chain_length": 1})
     if method == "GET" and path == f"/beliefs/{BELIEF}/provenance":
@@ -63,7 +65,9 @@ def client():
 def test_register_and_remember_hit_the_gateway(client):
     assert client.register_agent("support-bot", region="us-east") == AGENT
     assert client.register_source("https://vendor.com/x", "verified") == SOURCE
-    bid = client.remember(AGENT, "The refund window is 30 days.", source_id=SOURCE, parent_ids=[BELIEF])
+    bid = client.remember(
+        AGENT, "The refund window is 30 days.", source_id=SOURCE, parent_ids=[BELIEF]
+    )
     assert bid == BELIEF
 
     agent_req, source_req, belief_req = seen

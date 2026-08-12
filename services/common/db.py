@@ -8,8 +8,10 @@ import os
 import random
 import time
 from typing import Callable, TypeVar
+from uuid import UUID
 
 import psycopg
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 T = TypeVar("T")
@@ -61,6 +63,49 @@ def run_txn(fn: Callable[[psycopg.Connection], T]) -> T:
     def attempt() -> T:
         with get_pool().connection() as conn:
             with conn.transaction():
+                return fn(conn)
+
+    return retry_serialization(attempt)
+
+
+def tenant_role_name(tenant_id: UUID) -> str:
+    """Return the only SQL role name a tenant transaction may assume.
+
+    UUID parsing happens before this helper is called and the fixed prefix plus
+    hex encoding leaves no SQL syntax under caller control. Identifier quoting
+    is still used by run_tenant_txn as a second boundary.
+    """
+    return f"recant_t_{tenant_id.hex}"
+
+
+def tenant_roles_enabled() -> bool:
+    raw = os.environ.get("RECANT_DB_RLS")
+    normalized = raw.strip().lower() if raw is not None else None
+    truthy = {"1", "true", "yes", "on"}
+    falsey = {"0", "false", "no", "off"}
+    if normalized not in {None, *truthy, *falsey}:
+        raise RuntimeError("RECANT_DB_RLS must be a boolean value")
+    # Never honor an accidental development override in production.
+    if os.environ.get("RECANT_ENV", "").strip().lower() == "production":
+        return True
+    return normalized in truthy
+
+
+def run_tenant_txn(tenant_id: UUID, fn: Callable[[psycopg.Connection], T]) -> T:
+    """Run a serializable transaction under the tenant's database role.
+
+    Production defaults to role switching, which makes CockroachDB RLS a
+    backstop for every statement, including a query that accidentally omits a
+    tenant predicate. Development keeps the existing root-backed local stack
+    zero-configuration unless RECANT_DB_RLS is explicitly enabled.
+    """
+
+    def attempt() -> T:
+        with get_pool().connection() as conn:
+            with conn.transaction():
+                if tenant_roles_enabled():
+                    role = tenant_role_name(tenant_id)
+                    conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
                 return fn(conn)
 
     return retry_serialization(attempt)

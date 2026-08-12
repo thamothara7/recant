@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class BeliefSnapshot(BaseModel):
@@ -19,6 +19,12 @@ class BeliefSnapshot(BaseModel):
     prev_hash: str
     sig: str
     source_id: UUID | None = None
+    authority_rank: int = 0
+    origin_source_ids: list[UUID] = Field(default_factory=list)
+    context_receipt_id: UUID | None = None
+    provenance_method: str = "legacy"
+    provenance_version: str = "v1"
+    attestation_version: str = "v1"
 
 
 class DerivationOut(BaseModel):
@@ -26,6 +32,9 @@ class DerivationOut(BaseModel):
     parent_id: UUID
     kind: str
     score: float | None = None
+    evidence_method: str = "declared"
+    evidence_model: str | None = None
+    evidence_version: str = "v1"
 
 
 class CustodyStep(BaseModel):
@@ -59,6 +68,9 @@ class ActionOut(BaseModel):
     newly_flipped_ids: list[UUID]
     created_at: datetime
     sig_valid: bool
+    signing_algorithm: str = "ed25519"
+    signer_key_id: str = "legacy"
+    attestation_version: str = "v1"
 
 
 class IncidentSummary(BaseModel):
@@ -114,6 +126,7 @@ class BoardAgent(BaseModel):
     name: str
     region: str
     pubkey8: str
+    signing_algorithm: str
 
 
 class BoardSource(BaseModel):
@@ -122,6 +135,8 @@ class BoardSource(BaseModel):
     uri: str
     trust_tier: str
     region: str
+    authority_rank: int = 0
+    issuer: str = "legacy"
 
 
 class BoardOut(BaseModel):
@@ -136,3 +151,23 @@ class BoardOut(BaseModel):
     sources: list[BoardSource]
     beliefs: list[BeliefSnapshot]
     derivations: list[DerivationOut]
+
+
+class CheckpointOut(BaseModel):
+    checkpoint_id: UUID
+    root_hash: str
+    leaf_count: int
+    previous_root_hash: str | None = None
+    external_uri: str | None = None
+    created_at: datetime
+    sig: str
+    signing_algorithm: str
+    signer_key_id: str
+
+
+class CheckpointVerificationOut(BaseModel):
+    checkpoint_id: UUID
+    signature_valid: bool
+    merkle_root_valid: bool
+    current_root_matches: bool
+    external_copy_valid: bool | None = None

@@ -3,7 +3,6 @@ embed() (never on import or construction), and produce the request shape the
 verified live invoke uses. Selection and threshold helpers are the single source
 of truth shared by the fleet write path and the taint engine."""
 
-import io
 import json
 
 import pytest
@@ -59,6 +58,21 @@ def test_embed_rejects_wrong_dimension():
         emb.embed("some text")
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_embed_rejects_non_finite_output(value):
+    vector = [0.01] * DIMENSIONS
+    vector[7] = value
+    emb = TitanEmbedder(client=_FakeBedrock(vector))
+    with pytest.raises(ValueError, match="non-finite"):
+        emb.embed("some text")
+
+
+def test_embed_rejects_zero_output():
+    emb = TitanEmbedder(client=_FakeBedrock([0.0] * DIMENSIONS))
+    with pytest.raises(ValueError, match="zero embedding"):
+        emb.embed("some text")
+
+
 def test_embed_rejects_text_with_no_tokens():
     fake = _FakeBedrock([0.0] * DIMENSIONS)
     emb = TitanEmbedder(client=fake)
@@ -95,3 +109,17 @@ def test_taint_threshold_override_wins(monkeypatch):
     monkeypatch.setenv("RECANT_EMBEDDER", "titan")
     monkeypatch.setenv("RECANT_TAINT_THRESHOLD", "0.5")
     assert active_threshold() == 0.5
+
+
+@pytest.mark.parametrize("value", ["-0.1", "1.1", "nan", "inf", "invalid"])
+def test_taint_threshold_rejects_unsafe_values(monkeypatch, value):
+    monkeypatch.setenv("RECANT_TAINT_THRESHOLD", value)
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        active_threshold()
+
+
+def test_active_threshold_rejects_unknown_embedder(monkeypatch):
+    monkeypatch.delenv("RECANT_TAINT_THRESHOLD", raising=False)
+    monkeypatch.setenv("RECANT_EMBEDDER", "unknown")
+    with pytest.raises(ValueError, match="unknown RECANT_EMBEDDER"):
+        active_threshold()

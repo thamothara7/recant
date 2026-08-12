@@ -63,6 +63,7 @@ class S3EvidenceArchiver:
                 Key=key,
                 Body=body.encode("utf-8"),
                 ContentType=content_type,
+                ServerSideEncryption="AES256",
             )
             keys.append(key)
         return keys

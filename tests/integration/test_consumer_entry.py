@@ -11,13 +11,11 @@ from tests.integration.conftest import requires_db
 def _recant_outbox_event(client, quarantine_client):
     """Seed, recant, and return the recant outbox row as an EventBridge event
     dict shaped exactly the way the receiver would emit it."""
-    from fanout.lambda_entry import to_entries
     from fanout.handler import parse_event
+    from fanout.lambda_entry import to_entries
     from services.common.db import run_txn
 
-    agent = client.post(
-        "/agents", json={"name": f"ebridge-{time.time_ns()}"}
-    ).json()
+    agent = client.post("/agents", json={"name": f"ebridge-{time.time_ns()}"}).json()
     source = client.post(
         "/sources",
         json={"kind": "web_scrape", "uri": "https://example.com/eb", "trust_tier": "untrusted"},
@@ -81,8 +79,7 @@ class TestEventBridgeConsumer:
 
         receipts = run_txn(
             lambda conn: conn.execute(
-                "SELECT payload FROM memory_events WHERE kind = 'eviction'"
-                " AND incident_id = %s",
+                "SELECT payload FROM memory_events WHERE kind = 'eviction' AND incident_id = %s",
                 (eb_event["detail"]["incident_id"],),
             ).fetchall()
         )

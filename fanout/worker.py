@@ -24,7 +24,8 @@ from uuid import UUID
 import psycopg
 
 from fanout.handler import MalformedEvent, apply_evictions, parse_event, record_delivery
-from services.common.db import run_txn
+from services.common.auth import DEFAULT_TENANT_ID
+from services.common.db import run_tenant_txn, tenant_roles_enabled
 from services.common.logging import bind_incident, configure
 
 log = configure("fanout-worker")
@@ -39,8 +40,8 @@ POLL_SQL = """
     SELECT e.event_id, e.kind, e.incident_id, e.payload
     FROM memory_events e
     LEFT JOIN fanout_deliveries d
-           ON d.event_id = e.event_id AND d.consumer = %s
-    WHERE d.event_id IS NULL AND e.kind = 'recant'
+           ON d.tenant_id = e.tenant_id AND d.event_id = e.event_id AND d.consumer = %s
+    WHERE e.tenant_id = %s AND d.event_id IS NULL AND e.kind = 'recant'
     ORDER BY e.created_at
     LIMIT %s
 """
@@ -63,7 +64,10 @@ def deliver_event(
     try:
         event = parse_event(event_id, kind, incident_id, payload)
     except MalformedEvent as exc:
-        log.error("malformed outbox event; leaving undelivered", extra={"fields": {"event_id": str(event_id), "error": str(exc)}})
+        log.error(
+            "malformed outbox event; leaving undelivered",
+            extra={"fields": {"event_id": str(event_id), "error": str(exc)}},
+        )
         return False
     if event is None:  # not ours (the poll filters, but the contract allows any kind)
         return False
@@ -72,7 +76,7 @@ def deliver_event(
         receipt = apply_evictions(conn, event, consumer=consumer)
         if _pre_delivery_hook is not None:
             _pre_delivery_hook()
-        record_delivery(conn, event.event_id, consumer, receipt)
+        record_delivery(conn, event.event_id, consumer, receipt, event.tenant_id)
         with bind_incident(str(event.incident_id)):
             log.info(
                 "eviction delivered",
@@ -88,7 +92,13 @@ def deliver_event(
             )
 
     try:
-        run_txn(txn)
+        run_tenant_txn(event.tenant_id, txn)
+    except MalformedEvent as exc:
+        log.error(
+            "outbox event failed stored-record validation; leaving undelivered",
+            extra={"fields": {"event_id": str(event.event_id), "error": str(exc)}},
+        )
+        return False
     except psycopg.errors.UniqueViolation:
         # Two workers sharing a consumer name raced on this event; the peer's
         # delivery row committed first and this whole transaction rolled back
@@ -105,8 +115,17 @@ def deliver_event(
 def pass_once(consumer: str) -> int:
     """One poll pass: fetch the undelivered batch, deliver each event in its
     own transaction. Returns the number delivered."""
-    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
-        rows = conn.execute(POLL_SQL, (consumer, BATCH_LIMIT)).fetchall()
+    configured_tenant = os.environ.get("RECANT_TENANT_ID")
+    if tenant_roles_enabled() and not configured_tenant:
+        raise RuntimeError("RECANT_TENANT_ID is required when database RLS is enabled")
+    try:
+        tenant_id = UUID(configured_tenant) if configured_tenant else DEFAULT_TENANT_ID
+    except ValueError as exc:
+        raise RuntimeError("RECANT_TENANT_ID must be a UUID") from exc
+    rows = run_tenant_txn(
+        tenant_id,
+        lambda conn: conn.execute(POLL_SQL, (consumer, tenant_id, BATCH_LIMIT)).fetchall(),
+    )
     delivered = 0
     for event_id, kind, incident_id, payload in rows:
         if deliver_event(event_id, kind, incident_id, payload, consumer=consumer):
@@ -116,7 +135,9 @@ def pass_once(consumer: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Recant local eviction worker")
-    parser.add_argument("--consumer", required=True, help="durable consumer name (delivery ledger key)")
+    parser.add_argument(
+        "--consumer", required=True, help="durable consumer name (delivery ledger key)"
+    )
     parser.add_argument("--interval-ms", type=int, default=DEFAULT_INTERVAL_MS)
     parser.add_argument("--once", action="store_true", help="drain the backlog and exit")
     args = parser.parse_args()
@@ -127,7 +148,16 @@ def main() -> None:
 
     ensure_agent_memory()
 
-    log.info("worker started", extra={"fields": {"consumer": args.consumer, "interval_ms": args.interval_ms, "once": args.once}})
+    log.info(
+        "worker started",
+        extra={
+            "fields": {
+                "consumer": args.consumer,
+                "interval_ms": args.interval_ms,
+                "once": args.once,
+            }
+        },
+    )
     while True:
         delivered = pass_once(args.consumer)
         if args.once:

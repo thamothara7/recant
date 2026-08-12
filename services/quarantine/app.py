@@ -10,7 +10,6 @@ a whole on SQLSTATE 40001 by run_txn.
 from __future__ import annotations
 
 import json
-import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -19,11 +18,13 @@ from typing import Callable
 from uuid import UUID
 
 import psycopg
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from services.common.auth import Principal, auth_required, require_roles
 from services.common.config import cors_origins
-from services.common.db import run_txn
+from services.common.db import run_tenant_txn, run_txn
+from services.common.idempotency import replay, request_hash, store, validate_key
 from services.common.logging import bind_incident, configure
 from services.quarantine.action import action_digest, canonical_action_payload
 from services.quarantine.models import (
@@ -35,8 +36,8 @@ from services.quarantine.models import (
 )
 from services.taint_engine.engine import Closure, compute_closure
 
-try:  # dev signer; W4 swaps in KMS behind the same interface
-    from services.attest_gateway.signer import dev_action_signer_for
+try:
+    from services.attest_gateway.signer import quarantine_signer_for
 except ImportError:  # pragma: no cover
     raise
 
@@ -70,8 +71,14 @@ class _RecantResult:
     newly_flipped: list[tuple[UUID, UUID]]  # (belief_id, agent_id)
 
 
-def _require_source(conn: psycopg.Connection, source_id: UUID) -> None:
-    if conn.execute("SELECT 1 FROM sources WHERE source_id = %s", (source_id,)).fetchone() is None:
+def _require_source(conn: psycopg.Connection, source_id: UUID, tenant_id: UUID) -> None:
+    if (
+        conn.execute(
+            "SELECT 1 FROM sources WHERE tenant_id = %s AND source_id = %s",
+            (tenant_id, source_id),
+        ).fetchone()
+        is None
+    ):
         raise HTTPException(status_code=404, detail="unknown source")
 
 
@@ -81,7 +88,14 @@ def _closure_out_fields(closure: Closure) -> dict:
         "closure_ids": closure.member_ids,
         "agent_ids": closure.agent_ids,
         "inferred_edges": [
-            InferredEdgeOut(child_id=e.child_id, parent_id=e.parent_id, score=e.score)
+            InferredEdgeOut(
+                child_id=e.child_id,
+                parent_id=e.parent_id,
+                score=e.score,
+                evidence_method=e.evidence_method,
+                evidence_model=e.evidence_model,
+                evidence_version=e.evidence_version,
+            )
             for e in closure.inferred_edges
         ],
         "rounds": closure.rounds,
@@ -95,60 +109,102 @@ def _closure_out_fields(closure: Closure) -> dict:
 def healthz():
     try:
         run_txn(lambda conn: conn.execute("SELECT 1").fetchone())
-    except Exception:
-        raise HTTPException(status_code=503, detail="database unreachable")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="database unreachable") from exc
     return {"status": "ok"}
 
 
 @app.post("/taint/preview", response_model=PreviewOut)
-def preview(body: PreviewIn, response: Response) -> PreviewOut:
+def preview(
+    body: PreviewIn,
+    response: Response,
+    principal: Principal = Depends(require_roles("writer", "operator", "auditor")),
+) -> PreviewOut:
     def txn(conn: psycopg.Connection) -> tuple[Closure, int]:
-        _require_source(conn, body.source_id)
-        closure = compute_closure(conn, body.source_id)
+        _require_source(conn, body.source_id, principal.tenant_id)
+        closure = compute_closure(conn, body.source_id, tenant_id=principal.tenant_id)
         would_flip = 0
         if closure.member_ids:
-            would_flip = conn.execute(
-                "SELECT count(*) FROM beliefs WHERE belief_id = ANY(%s)"
+            count_row = conn.execute(
+                "SELECT count(*) FROM beliefs WHERE tenant_id = %s AND belief_id = ANY(%s)"
                 " AND status IN ('active','suspect')",
-                (closure.member_ids,),
-            ).fetchone()[0]
+                (principal.tenant_id, closure.member_ids),
+            ).fetchone()
+            assert count_row is not None
+            would_flip = count_row[0]
         return closure, int(would_flip)
 
-    closure, would_flip = run_txn(txn)
+    closure, would_flip = run_tenant_txn(principal.tenant_id, txn)
     response.headers.append("X-Recant-Primitive", f"VECTOR kNN | {closure.knn_ms}ms")
     return PreviewOut(**_closure_out_fields(closure), would_flip=would_flip)
 
 
 @app.post("/recant", response_model=RecantOut)
-def recant(body: RecantIn, response: Response) -> RecantOut:
+def recant(
+    body: RecantIn,
+    response: Response,
+    principal: Principal = Depends(require_roles("operator")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RecantOut:
     t0 = time.perf_counter()
+    actor = principal.subject if auth_required() else body.actor
+    key = validate_key(idempotency_key)
+    request_digest = request_hash({"source_id": body.source_id, "actor": actor})
+    try:
+        signer = quarantine_signer_for(actor)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    def txn(conn: psycopg.Connection) -> _RecantResult:
-        _require_source(conn, body.source_id)
-        closure = compute_closure(conn, body.source_id)
+    def txn(conn: psycopg.Connection) -> _RecantResult | RecantOut:
+        prior = replay(
+            conn,
+            tenant_id=principal.tenant_id,
+            principal_key=principal.key,
+            method="POST",
+            path="/recant",
+            key=key,
+            digest=request_digest,
+        )
+        if prior is not None:
+            return RecantOut.model_validate(prior)
+        _require_source(conn, body.source_id, principal.tenant_id)
+        closure = compute_closure(conn, body.source_id, tenant_id=principal.tenant_id)
 
         for e in closure.inferred_edges:
             conn.execute(
-                "INSERT INTO derivations (child_id, parent_id, kind, score)"
-                " VALUES (%s, %s, 'inferred', %s)"
+                "INSERT INTO derivations"
+                " (tenant_id, child_id, parent_id, kind, score, evidence_method,"
+                " evidence_model, evidence_version)"
+                " VALUES (%s, %s, %s, 'inferred', %s, %s, %s, %s)"
                 " ON CONFLICT (child_id, parent_id) DO NOTHING",
-                (e.child_id, e.parent_id, e.score),
+                (
+                    principal.tenant_id,
+                    e.child_id,
+                    e.parent_id,
+                    e.score,
+                    e.evidence_method,
+                    e.evidence_model,
+                    e.evidence_version,
+                ),
             )
 
         newly_flipped: list[tuple[UUID, UUID]] = []
         if closure.member_ids:
             newly_flipped = conn.execute(
                 "UPDATE beliefs SET status = 'quarantined'"
-                " WHERE belief_id = ANY(%s) AND status IN ('active','suspect')"
+                " WHERE tenant_id = %s AND belief_id = ANY(%s)"
+                " AND status IN ('active','suspect')"
                 " RETURNING belief_id, agent_id",
-                (closure.member_ids,),
+                (principal.tenant_id, closure.member_ids),
             ).fetchall()
 
-        incident_id, created_at = conn.execute(
-            "INSERT INTO incidents (source_id, opened_by) VALUES (%s, %s)"
+        incident_row = conn.execute(
+            "INSERT INTO incidents (tenant_id, source_id, opened_by) VALUES (%s, %s, %s)"
             " RETURNING incident_id, created_at",
-            (body.source_id, body.actor),
+            (principal.tenant_id, body.source_id, actor),
         ).fetchone()
+        assert incident_row is not None
+        incident_id, created_at = incident_row
 
         flipped_ids = [b for b, _ in newly_flipped]
         payload = canonical_action_payload(
@@ -156,16 +212,43 @@ def recant(body: RecantIn, response: Response) -> RecantOut:
             source_id=body.source_id,
             newly_flipped_ids=flipped_ids,
             belief_count=len(flipped_ids),
-            actor=body.actor,
+            actor=actor,
             ts=created_at,
+            tenant_id=principal.tenant_id,
+            attestation_version="v2",
         )
-        sig = dev_action_signer_for(body.actor).sign(action_digest(payload))
+        sig = signer.sign(action_digest(payload))
         conn.execute(
             "INSERT INTO quarantine_actions"
-            " (incident_id, belief_count, actor, sig, newly_flipped_ids)"
-            " VALUES (%s, %s, %s, %s, %s)",
-            (incident_id, len(flipped_ids), body.actor, sig, flipped_ids),
+            " (tenant_id, incident_id, belief_count, actor, sig, newly_flipped_ids,"
+            " signer_pubkey, signing_algorithm, signer_key_id, attestation_version)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'v2')",
+            (
+                principal.tenant_id,
+                incident_id,
+                len(flipped_ids),
+                actor,
+                sig,
+                flipped_ids,
+                signer.public_key_bytes(),
+                signer.algorithm,
+                signer.key_id,
+            ),
         )
+
+        # Permits are execution capabilities, so revoke them in the same commit
+        # as the quarantine rather than waiting for asynchronous fanout. The
+        # existing worker still aborts agent_actions and evicts runtime memory.
+        if closure.member_ids:
+            conn.execute(
+                "UPDATE action_permits AS p SET revoked_at = now(),"
+                " revoke_reason = 'recant', incident_id = %s"
+                " FROM action_decisions AS d"
+                " WHERE p.tenant_id = %s AND d.tenant_id = p.tenant_id"
+                " AND d.decision_id = p.decision_id AND p.consumed_at IS NULL"
+                " AND p.revoked_at IS NULL AND d.support_belief_ids && %s",
+                (incident_id, principal.tenant_id, closure.member_ids),
+            )
 
         # Eviction contract (design review 2026-07-03): the W3 fanout keys on
         # `evictions`, grouped per agent from the flip's RETURNING pairs — only
@@ -174,20 +257,28 @@ def recant(body: RecantIn, response: Response) -> RecantOut:
         for belief_id, agent_id in newly_flipped:
             evictions[agent_id].append(belief_id)
         conn.execute(
-            "INSERT INTO memory_events (kind, incident_id, payload) VALUES ('recant', %s, %s)",
+            "INSERT INTO memory_events (tenant_id, kind, incident_id, payload)"
+            " VALUES (%s, 'recant', %s, %s)",
             (
+                principal.tenant_id,
                 incident_id,
                 json.dumps(
                     {
                         "source_id": str(body.source_id),
-                        "actor": body.actor,
+                        "tenant_id": str(principal.tenant_id),
+                        "actor": actor,
                         "closure_ids": [str(b) for b in closure.member_ids],
                         "evictions": [
                             {"agent_id": str(a), "belief_ids": sorted(str(b) for b in bs)}
                             for a, bs in sorted(evictions.items(), key=lambda kv: str(kv[0]))
                         ],
                         "inferred_edges": [
-                            {"child_id": str(e.child_id), "parent_id": str(e.parent_id), "score": e.score}
+                            {
+                                "child_id": str(e.child_id),
+                                "parent_id": str(e.parent_id),
+                                "score": e.score,
+                                "evidence_method": e.evidence_method,
+                            }
                             for e in closure.inferred_edges
                         ],
                     }
@@ -196,9 +287,29 @@ def recant(body: RecantIn, response: Response) -> RecantOut:
         )
         if _after_flip_hook is not None:
             _after_flip_hook()
+        raw_result = RecantOut(
+            **_closure_out_fields(closure),
+            incident_id=incident_id,
+            belief_count=len(newly_flipped),
+            newly_flipped_ids=[belief_id for belief_id, _ in newly_flipped],
+        )
+        store(
+            conn,
+            tenant_id=principal.tenant_id,
+            principal_key=principal.key,
+            method="POST",
+            path="/recant",
+            key=key,
+            digest=request_digest,
+            response_status=200,
+            response_body=raw_result.model_dump(mode="json"),
+        )
         return _RecantResult(closure, incident_id, created_at, newly_flipped)
 
-    result = run_txn(txn)
+    result = run_tenant_txn(principal.tenant_id, txn)
+    if isinstance(result, RecantOut):
+        response.headers.append("X-Recant-Primitive", "SERIALIZABLE TXN | replay")
+        return result
     txn_ms = int((time.perf_counter() - t0) * 1000)
 
     with bind_incident(str(result.incident_id)):
@@ -207,7 +318,7 @@ def recant(body: RecantIn, response: Response) -> RecantOut:
             extra={
                 "fields": {
                     "source_id": str(body.source_id),
-                    "actor": body.actor,
+                    "actor": actor,
                     "closure_size": len(result.closure.member_ids),
                     "belief_count": len(result.newly_flipped),
                     "inferred_edges": len(result.closure.inferred_edges),

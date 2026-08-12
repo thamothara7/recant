@@ -2,8 +2,6 @@
 results back, returns the final answer, recovers from a rejected query, and stops
 at the step budget. Bedrock and the SQL tool are fakes, so no AWS and no DB."""
 
-import pytest
-
 from agent.investigator import MAX_STEPS, Investigator
 from agent.readonly_sql import UnsafeQuery
 
@@ -13,7 +11,9 @@ def _tool_use(sql, tuid="t1"):
         "output": {
             "message": {
                 "role": "assistant",
-                "content": [{"toolUse": {"toolUseId": tuid, "name": "query_memory", "input": {"sql": sql}}}],
+                "content": [
+                    {"toolUse": {"toolUseId": tuid, "name": "query_memory", "input": {"sql": sql}}}
+                ],
             }
         },
         "stopReason": "tool_use",
@@ -43,7 +43,11 @@ class _FakeBedrock:
 
 class _FakeSQL:
     def __init__(self, result=None, raises=None):
-        self.result = result or {"columns": ["status"], "rows": [{"status": "quarantined"}], "truncated": False}
+        self.result = result or {
+            "columns": ["status"],
+            "rows": [{"status": "quarantined"}],
+            "truncated": False,
+        }
         self.raises = raises
         self.queries = []
 
@@ -55,7 +59,9 @@ class _FakeSQL:
 
 
 def test_runs_query_then_answers():
-    fake = _FakeBedrock([_tool_use("SELECT status FROM beliefs LIMIT 1"), _final("The belief is quarantined.")])
+    fake = _FakeBedrock(
+        [_tool_use("SELECT status FROM beliefs LIMIT 1"), _final("The belief is quarantined.")]
+    )
     sql = _FakeSQL()
     result = Investigator(sql=sql, client=fake).ask("is this belief clean?")
     assert result["answer"] == "The belief is quarantined."
@@ -71,7 +77,9 @@ def test_runs_query_then_answers():
 
 
 def test_recovers_from_rejected_query():
-    fake = _FakeBedrock([_tool_use("DELETE FROM beliefs"), _final("I can only read; here is what I found.")])
+    fake = _FakeBedrock(
+        [_tool_use("DELETE FROM beliefs"), _final("I can only read; here is what I found.")]
+    )
     sql = _FakeSQL(raises=UnsafeQuery("only read-only queries are allowed"))
     result = Investigator(sql=sql, client=fake).ask("delete everything")
     assert result["answer"].startswith("I can only read")

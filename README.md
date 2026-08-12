@@ -8,6 +8,11 @@ descendants, and semantically similar copies that have no recorded edge. A
 durable outbox then evicts those beliefs from agent working memory and aborts
 any pending actions that depended on them.
 
+Recant Guard adds a proof-carrying action boundary. It turns signed retrieval
+context and memory authority into an immutable `allow`, `confirm`, or `deny`
+decision. Allowed actions receive a short-lived, exact-argument, single-use
+permit that a tool executor consumes immediately before the side effect.
+
 Recant is not a chatbot or a RAG application. It is the custody and incident
 response layer that sits beneath an agent-memory system.
 
@@ -36,10 +41,13 @@ and needs no backend.
 5. [Everyday commands](#everyday-commands)
 6. [Service and API reference](#service-and-api-reference)
 7. [Integrating an agent](#integrating-an-agent)
-8. [Optional features](#optional-features)
-9. [Troubleshooting](#troubleshooting)
-10. [Safety notes](#safety-notes)
-11. [License](#license)
+8. [Recant Guard](#recant-guard)
+9. [Production security](#production-security)
+10. [Optional features](#optional-features)
+11. [Using Codex on this repository](#using-codex-on-this-repository)
+12. [Troubleshooting](#troubleshooting)
+13. [Safety notes](#safety-notes)
+14. [License](#license)
 
 ---
 
@@ -50,6 +58,7 @@ and needs no backend.
 | Attest gateway | `services/attest_gateway/` | The only supported write path. Creates agents and sources, attests beliefs, and maintains each agent's signed hash chain. |
 | Quarantine service | `services/quarantine/` | Previews and executes `recant(source_id)` inside a serializable transaction. |
 | Forensics API | `services/forensics/` | Read-only board, provenance, custody-chain, incident, evidence, and time-travel queries. |
+| Recant Guard | `services/guard/` | Signs retrieval receipts, evaluates tool policy, records decisions, and issues one-use action permits. |
 | Taint engine | `services/taint_engine/` | Traverses explicit derivations and vector similarity matches to compute the contamination closure. |
 | Fanout | `fanout/` | Local durable outbox worker and AWS Lambda/EventBridge implementation for eviction. |
 | Demo fleet | `fleet/` | Three deterministic agents with CockroachDB-backed working memory. |
@@ -62,7 +71,7 @@ and needs no backend.
 
 ### For the console only (Option A)
 
-- Node.js 20 or newer
+- Node.js 20.19+ or 22.12+
 - npm (bundled with Node.js)
 - Git
 
@@ -72,7 +81,7 @@ and needs no backend.
   three-node local CockroachDB cluster.
 - **uv** (https://docs.astral.sh/uv/), which manages the Python version and all
   Python dependencies. You do not need a separate Python installation.
-- **Node.js 20+** and npm, for the console only.
+- **Node.js 20.19+ or 22.12+** and npm, for the console only.
 - Git.
 
 #### Install on macOS
@@ -251,13 +260,14 @@ terminal until you press Ctrl+C.
 bash ops/run-services.sh
 ```
 
-This starts three FastAPI services in a single terminal:
+This starts four FastAPI services in a single terminal:
 
 | Service | URL | Interactive API docs |
 | --- | --- | --- |
 | Attest gateway | http://localhost:8000 | http://localhost:8000/docs |
 | Quarantine service | http://localhost:8001 | http://localhost:8001/docs |
 | Forensics API | http://localhost:8002 | http://localhost:8002/docs |
+| Recant Guard | http://localhost:8003 | http://localhost:8003/docs |
 
 The launcher checks that those ports are free before starting. If a port is
 already in use it will print the process IDs and exit. See the
@@ -294,6 +304,7 @@ From a third terminal, check that each service is healthy:
 curl -fsS http://localhost:8000/healthz
 curl -fsS http://localhost:8001/healthz
 curl -fsS http://localhost:8002/healthz
+curl -fsS http://localhost:8003/healthz
 ```
 
 Each command should print `{"status":"ok"}`. If a command hangs or returns an
@@ -376,13 +387,14 @@ curl -fsS http://localhost:8002/board | uv run python -m json.tool
 ### Step 10: connect the console to the local services
 
 The console uses fixture data by default. To point it at the running local
-services, pass both service URLs as build-time Vite environment variables:
+services, pass the service URLs as build-time Vite environment variables:
 
 ```bash
 cd console
 npm ci
 VITE_FORENSICS_URL=http://localhost:8002 \
 VITE_QUARANTINE_URL=http://localhost:8001 \
+VITE_GUARD_URL=http://localhost:8003 \
   npm run dev
 ```
 
@@ -393,6 +405,10 @@ Important notes:
 
 - These are build-time Vite variables. If you change them, stop Vite and
   restart it.
+- `VITE_RECANT_TOKEN` is allowed only for local development. The production
+  build fails if it is set because any Vite variable is readable by the
+  browser. Use a backend-for-frontend or another server-side session boundary
+  for an authenticated hosted console.
 - The console must be served from an origin listed in `RECANT_CORS_ORIGINS`.
   The local default is `http://localhost:5173`. If your browser reports a
   CORS error, check that value in your `.env` file and restart the services.
@@ -407,14 +423,14 @@ Important notes:
 | Stop database | `docker compose -f ops/chaos/docker-compose.yml down` | Does not delete data. |
 | Reset database | `bash ops/chaos/reset.sh` | Destroys Docker volumes and all data. |
 | Apply schema | `uv run python -m db.migrate` | Requires an exported `DATABASE_URL`. Safe to repeat. |
-| Start services | `bash ops/run-services.sh` | Starts gateway `:8000`, quarantine `:8001`, forensics `:8002`. |
-| Stop services | Ctrl+C in the services terminal | Stops all three services. |
+| Start services | `bash ops/run-services.sh` | Starts gateway `:8000`, quarantine `:8001`, forensics `:8002`, Guard `:8003`. |
+| Stop services | Ctrl+C in the services terminal | Stops all four services. |
 | Start eviction worker | `uv run python -m fanout.worker --consumer local-evictor` | Requires `DATABASE_URL`. |
 | Seed demo data | `uv run python ops/seed/seed.py` | Requires a clean database and a running gateway. |
 | Run all tests | `uv run pytest` | Integration tests clear database rows. Stop services first. |
 | Run unit tests only | `env -u DATABASE_URL uv run pytest tests/unit` | No database needed. |
 | Start console (fixtures) | `cd console && npm run dev` | No backend required. |
-| Start console (live) | `VITE_FORENSICS_URL=http://localhost:8002 VITE_QUARANTINE_URL=http://localhost:8001 npm run dev` | Run from `console/`. Requires running services. |
+| Start console (live) | `VITE_FORENSICS_URL=http://localhost:8002 VITE_QUARANTINE_URL=http://localhost:8001 VITE_GUARD_URL=http://localhost:8003 npm run dev` | Run from `console/`. Requires running services. |
 | Build console | `cd console && npm ci && npm run build` | Output goes to `console/dist/`. Not committed. |
 | Run fleet demo | `uv run python -m fleet.run --ticks 4` | Requires clean database, running gateway, and exported environment. |
 | Inspect fleet working memory | `uv run python -m fleet.show --agent ops` | Run after the fleet demo. |
@@ -455,7 +471,21 @@ The most commonly used endpoints are listed below.
 | `GET /agents/{agent_id}/custody-chain` | Full verified custody chain for an agent. |
 | `GET /incidents/{incident_id}` | Incident summary and signed actions. |
 | `GET /incidents/{incident_id}/affidavit` | Template or Bedrock-generated incident affidavit. |
+| `POST /checkpoints` | Sign the current per-agent chain heads into a Merkle custody checkpoint. |
+| `GET /checkpoints/{checkpoint_id}/verify` | Verify the signature, Merkle root, current state, and optional external copy. |
 | `GET /healthz` | Returns `{"status":"ok"}`. |
+
+### Recant Guard (port 8003)
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /contexts/receipts` | Signs the exact active beliefs retrieved for one agent and their least authority. |
+| `POST /actions/authorize` | Returns a signed `allow`, `confirm`, or `deny` policy decision. |
+| `POST /actions/decisions/{decision_id}/confirm` | Records independent operator confirmation and issues a superseding permit. |
+| `POST /actions/permits/consume` | Atomically verifies and consumes a permit for exact tool arguments. |
+| `GET /actions/decisions` | Lists immutable action decisions for audit and the console. |
+| `PUT /policies/tools/{tool_name}` | Registers a tenant tool policy. Requires `policy_admin`. |
+| `POST /semantic-relations/verify` | Stores evidence for exact, contradictory, or model-verified claim relations. |
 
 ---
 
@@ -470,33 +500,95 @@ from recant_client import RecantClient
 
 with RecantClient() as recant:
     agent_id = recant.register_agent("support-bot", region="us-east")
-    trusted = recant.register_source(
-        "https://vendor.example/refund-policy", "verified"
-    )
-    unsafe = recant.register_source(
-        "https://forum.example/thread/42", "untrusted"
-    )
+    trusted = recant.register_source("https://vendor.example/refund-policy", "verified")
+    unsafe = recant.register_source("https://forum.example/thread/42", "untrusted")
 
     recant.remember(agent_id, "Refunds are available for 30 days.", source_id=trusted)
-    bad_belief = recant.remember(
-        agent_id, "Refunds can be extended to a year.", source_id=unsafe
-    )
+    bad_belief = recant.remember(agent_id, "Refunds can be extended to a year.", source_id=unsafe)
     recant.remember(
         agent_id,
         "Approve a 365-day refund.",
         parent_ids=[bad_belief],
     )
 
-    preview = recant.preview(unsafe)       # read-only, no mutation
-    incident = recant.recant(unsafe)       # quarantines the full closure
+    preview = recant.preview(unsafe)  # read-only, no mutation
+    incident = recant.recant(unsafe)  # quarantines the full closure
     proof = recant.incident(incident["incident_id"])
 ```
 
-The client accepts alternate service base URLs as constructor arguments.
+The client accepts alternate service base URLs and a bearer token as constructor
+arguments. It generates a fresh idempotency key for every mutation.
 Supplying your own embedding requires exactly 1024 floats. If you do not supply
 one, the configured embedder generates one. In production, replace the
 deterministic development signer before setting `RECANT_ENV=production`: the
 development signer will refuse to issue signatures in that mode.
+
+---
+
+## Recant Guard
+
+The executor pattern is intentionally small:
+
+```python
+import os
+
+from recant_client import RecantClient
+
+arguments = {"account_id": 42, "amount": 25}
+
+with RecantClient(token=os.environ["RECANT_API_TOKEN"]) as recant:
+    receipt = recant.context_receipt(agent_id, retrieved_belief_ids)
+    decision = recant.authorize_action(
+        agent_id,
+        "refund",
+        arguments,
+        context_receipt_id=receipt["receipt_id"],
+    )
+    if decision["decision"] != "allow":
+        raise RuntimeError(decision["reason"])
+
+    recant.consume_permit(decision["permit"], "refund", arguments)
+    refund_provider.refund(**arguments)
+```
+
+For a `confirm` result, send the decision ID to a separate operator principal.
+That principal calls `confirm_action`, producing a signed superseding `allow`
+decision and a new permit.
+
+The permit binds the tenant, agent, tool arguments, supporting belief IDs,
+policy version, nonce, and expiry. A recant revokes unused permits in the same
+database transaction that quarantines their support. Consumption is single-use.
+If the external tool fails after consumption, request a new authorization; do
+not replay the capability.
+
+## Production security
+
+Production mode enables bearer authentication, required provenance, database
+RLS role switching, and KMS-only signing by default. Provision each tenant and
+its first principal with:
+
+```bash
+RECANT_ENV=production \
+DATABASE_URL='postgresql://admin:...@cluster:26257/recant?sslmode=verify-full' \
+uv run python ops/provision_tenant.py acme \
+  --display-name 'Acme' \
+  --subject owner \
+  --app-db-role recant_app
+```
+
+The command prints the API token once. Store it in a secret manager. The
+database stores only its SHA-256 digest. Register every production agent with
+an asymmetric AWS KMS signing key and set `RECANT_CONTROL_KMS_KEY_ARN` for
+source assertions, recant actions, Guard decisions, permits, and checkpoints.
+Set `RECANT_IDEMPOTENCY_ENCRYPTION_KEY` to a secret 32-byte base64 value so
+exactly replayed mutation responses, including one-use permits, stay encrypted
+in CockroachDB. Generate one with `openssl rand -base64 32` and store it with
+the other runtime secrets.
+
+Read [Security and Recant Guard](docs/security-and-guard.md) before deploying.
+It covers roles, authority ranks, KMS requirements, RLS provisioning,
+checkpoint publication, webhook authentication, failure behavior, and known
+boundaries.
 
 ---
 
@@ -530,7 +622,8 @@ The contaminated working-memory entries will be gone and the pending refund
 action will be marked aborted.
 
 The fleet runner will fail rather than duplicate data if custody records already
-exist. Reset the local cluster first if you want a fresh replay.
+exist. Each runtime-memory row carries tenant metadata protected by RLS. Reset
+the local cluster first if you want a fresh replay.
 
 ### Scale test
 
@@ -556,6 +649,8 @@ hard-coded affidavit template. Optional cloud features are:
 | `RECANT_EMBEDDER=titan` | Amazon Titan Text Embeddings V2 for semantic vector matching | AWS credentials and Bedrock access with a 1024-dimensional model |
 | `RECANT_AFFIDAVIT=bedrock` | Claude-generated incident affidavit | AWS credentials and Bedrock model access. Falls back to the template on any runtime failure. |
 | `RECANT_EVIDENCE_BUCKET=<bucket>` | `POST /incidents/{id}/archive` endpoint | AWS credentials and write access to the named S3 bucket |
+| `RECANT_CHECKPOINT_BUCKET=<bucket>` | Independent signed custody checkpoints | S3 write access; enable Object Lock before using `RECANT_OBJECT_LOCK_DAYS` |
+| `RECANT_CLAIM_VERIFIER=bedrock` | Model-backed claim relation evidence | Bedrock Converse access; weak entailment cannot expand taint closure |
 | `fanout/iac/package.sh` and `deploy.sh` | Package and deploy the Lambda/EventBridge fanout path | AWS CLI, a cloud database URL in `.env`, and a CockroachDB Cloud CA certificate |
 
 Keep all AWS credentials and the `DATABASE_URL_CLOUD` value in the `.env` file.
@@ -564,8 +659,39 @@ Never commit them to source control.
 Additional documentation:
 
 - `docs/mcp-setup.md` covers CockroachDB Cloud MCP configuration.
+- `docs/security-and-guard.md` covers the production threat model and Guard integration.
 - `docs/demo-script.md` describes the presentation flow for the console.
 - `docs/plan.md` records implementation decisions and historical status.
+
+---
+
+## Using Codex on this repository
+
+Open the repository as the Codex workspace and describe the outcome you want,
+the constraints that matter, and how completion should be verified. Useful
+prompts include:
+
+```text
+Diagnose why permit consumption returns 409. Do not change files.
+
+Implement tenant-safe receipt listing without breaking the current API. Add
+regression tests and run the full backend and console checks.
+
+Review my uncommitted diff for security, tenancy, concurrency, and migration
+bugs. Report findings only.
+
+Fix the approved findings, update the docs, commit, and push to GitHub.
+```
+
+The root `AGENTS.md` gives Codex persistent project-specific instructions,
+including Recant's security invariants and release checks. For best results,
+keep one request centered on one outcome, mention files or error output when
+you have them, distinguish diagnosis from implementation, and explicitly say
+whether committing, pushing, deployment, or cloud mutation is allowed.
+
+Official references: [Codex best practices](https://learn.chatgpt.com/guides/best-practices),
+[prompting](https://learn.chatgpt.com/docs/prompting), and
+[`AGENTS.md` configuration](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
 
 ---
 
@@ -765,9 +891,10 @@ require AWS credentials, a configured region, and feature-specific access
 **Symptom:** The services refuse to start or return signer errors after setting
 `RECANT_ENV=production`.
 
-**Resolution:** This behavior is intentional. The deterministic development
-signer is blocked in production mode to prevent it from being used in a real
-deployment. Configure a production signer before enabling that setting.
+**Resolution:** This behavior is intentional. Configure
+`RECANT_CONTROL_KMS_KEY_ARN`, pass `kms_key_arn` when registering every agent,
+provision the tenant SQL role, and send a valid bearer token. The deterministic
+development signer is blocked in production.
 
 ---
 

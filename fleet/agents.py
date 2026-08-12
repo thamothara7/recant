@@ -21,7 +21,7 @@ import psycopg
 from psycopg.types.json import Json
 
 from fleet import story
-from fleet.bootstrap import history_for, store_for
+from fleet.bootstrap import history_for, runtime_tenant_id, store_for
 from fleet.gateway import BeliefReceipt, GatewayClient
 from services.common.logging import configure
 
@@ -38,6 +38,7 @@ class Fleet:
     belief_ids: dict[str, UUID] = field(default_factory=dict)
     statuses: dict[str, str] = field(default_factory=dict)
     action_ids: list[UUID] = field(default_factory=list)
+    tenant_id: UUID = field(default_factory=runtime_tenant_id)
 
 
 def setup(gateway: GatewayClient) -> Fleet:
@@ -61,7 +62,13 @@ def _mirror(fleet: Fleet, agent: str, key: str, receipt: BeliefReceipt, content:
     store_for(fleet.agent_ids[agent]).add_texts(
         [content],
         ids=[str(receipt.belief_id)],
-        metadatas=[{"story_key": key, "seq": receipt.seq}],
+        metadatas=[
+            {
+                "story_key": key,
+                "seq": receipt.seq,
+                "tenant_id": str(fleet.tenant_id),
+            }
+        ],
     )
     # Close the mirror-resurrect race: a recant can flip this belief between
     # the gateway 201 and the add_texts above, and its eviction event may have
@@ -72,12 +79,21 @@ def _mirror(fleet: Fleet, agent: str, key: str, receipt: BeliefReceipt, content:
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         status = conn.execute(
             "SELECT status FROM beliefs WHERE belief_id = %s", (receipt.belief_id,)
-        ).fetchone()[0]
-        if status != "active":
+        ).fetchone()
+        assert status is not None
+        status_value = status[0]
+        if status_value != "active":
             conn.execute("DELETE FROM agent_memory WHERE id = %s", (receipt.belief_id,))
             log.warning(
                 "belief flipped between write and mirror; mirror removed",
-                extra={"fields": {"agent": agent, "key": key, "belief_id": str(receipt.belief_id), "status": status}},
+                extra={
+                    "fields": {
+                        "agent": agent,
+                        "key": key,
+                        "belief_id": str(receipt.belief_id),
+                        "status": status_value,
+                    }
+                },
             )
             return False
     return True
@@ -128,7 +144,7 @@ def _enqueue_action(fleet: Fleet) -> None:
     spec = story.ACTION
     derived_from = [fleet.belief_ids[k] for k in spec["derived_from_keys"]]
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
-        action_id = conn.execute(
+        action_row = conn.execute(
             "INSERT INTO agent_actions (agent_id, kind, payload, derived_from)"
             " VALUES (%s, %s, %s, %s) RETURNING action_id",
             (
@@ -137,7 +153,9 @@ def _enqueue_action(fleet: Fleet) -> None:
                 Json(spec["payload"]),
                 derived_from,
             ),
-        ).fetchone()[0]
+        ).fetchone()
+        assert action_row is not None
+        action_id = action_row[0]
     fleet.action_ids.append(action_id)
     history_for(spec["agent"]).add_ai_message(
         f"queued {spec['kind']} action {action_id} for {spec['payload']['customer']}"

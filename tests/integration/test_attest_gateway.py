@@ -154,25 +154,63 @@ def test_full_rehash_forgery_fails_signature(client):
     _belief(client, agent["agent_id"], "two")
 
     with get_pool().connection() as conn:
-        seq1, source_id1, ts1 = conn.execute(
-            "SELECT seq, source_id, created_at FROM beliefs WHERE agent_id = %s AND seq = 1",
+        row1 = conn.execute(
+            "SELECT tenant_id, seq, source_id, created_at, context_receipt_id,"
+            " authority_rank, origin_source_ids, provenance_method, provenance_version"
+            " FROM beliefs WHERE agent_id = %s AND seq = 1",
             (agent["agent_id"],),
         ).fetchone()
-        seq2, source_id2, ts2, content2 = conn.execute(
-            "SELECT seq, source_id, created_at, content FROM beliefs WHERE agent_id = %s AND seq = 2",
+        row2 = conn.execute(
+            "SELECT tenant_id, seq, source_id, created_at, content, context_receipt_id,"
+            " authority_rank, origin_source_ids, provenance_method, provenance_version"
+            " FROM beliefs WHERE agent_id = %s AND seq = 2",
             (agent["agent_id"],),
         ).fetchone()
+        assert row1 is not None and row2 is not None
+        tenant_id, seq1, source_id1, ts1, receipt1, rank1, origins1, method1, version1 = row1
+        (
+            _,
+            seq2,
+            source_id2,
+            ts2,
+            content2,
+            receipt2,
+            rank2,
+            origins2,
+            method2,
+            version2,
+        ) = row2
 
         forged_content = "the refund window is 365 days"
-        payload1 = chain.canonical_payload(
-            agent_id=agent_uuid, seq=seq1, content=forged_content,
-            source_id=source_id1, parent_ids=[], ts=ts1,
+        payload1 = chain.canonical_payload_v2(
+            tenant_id=tenant_id,
+            agent_id=agent_uuid,
+            seq=seq1,
+            content=forged_content,
+            source_id=source_id1,
+            parent_ids=[],
+            context_receipt_id=receipt1,
+            authority_rank=rank1,
+            origin_source_ids=list(origins1 or []),
+            provenance_method=method1,
+            provenance_version=version1,
+            ts=ts1,
         )
         hash1 = chain.chain_hash(chain.GENESIS, payload1)
 
-        payload2 = chain.canonical_payload(
-            agent_id=agent_uuid, seq=seq2, content=content2,
-            source_id=source_id2, parent_ids=[], ts=ts2,
+        payload2 = chain.canonical_payload_v2(
+            tenant_id=tenant_id,
+            agent_id=agent_uuid,
+            seq=seq2,
+            content=content2,
+            source_id=source_id2,
+            parent_ids=[],
+            context_receipt_id=receipt2,
+            authority_rank=rank2,
+            origin_source_ids=list(origins2 or []),
+            provenance_method=method2,
+            provenance_version=version2,
+            ts=ts2,
         )
         hash2 = chain.chain_hash(hash1, payload2)
 
@@ -205,9 +243,7 @@ def test_tail_truncation_detected(client):
     _belief(client, agent["agent_id"], "two")
 
     with get_pool().connection() as conn:
-        conn.execute(
-            "DELETE FROM beliefs WHERE agent_id = %s AND seq = 2", (agent["agent_id"],)
-        )
+        conn.execute("DELETE FROM beliefs WHERE agent_id = %s AND seq = 2", (agent["agent_id"],))
 
     v = client.get(f"/agents/{agent['agent_id']}/chain/verify").json()
     assert v["valid"] is False
@@ -242,9 +278,7 @@ def test_duplicate_parent_ids_deduped(client):
 
     agent = _agent(client)
     b1 = _belief(client, agent["agent_id"], "one")
-    b2 = _belief(
-        client, agent["agent_id"], "two", parent_ids=[b1["belief_id"], b1["belief_id"]]
-    )
+    b2 = _belief(client, agent["agent_id"], "two", parent_ids=[b1["belief_id"], b1["belief_id"]])
     with get_pool().connection() as conn:
         rows = conn.execute(
             "SELECT parent_id FROM derivations WHERE child_id = %s", (b2["belief_id"],)

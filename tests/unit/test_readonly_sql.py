@@ -62,8 +62,6 @@ class _FakeConn:
         self.executed: list[str] = []
 
     def transaction(self):
-        outer = self
-
         class _T:
             def __enter__(self):
                 return None

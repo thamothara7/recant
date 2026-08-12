@@ -4,7 +4,7 @@
 // CONFIG.live; the fixture path never imports this.
 
 import { CONFIG } from "./config";
-import type { Agent, Belief, BeliefStatus, Derivation, Source, TrustTier } from "../data/types";
+import type { ActionDecision, Agent, Belief, BeliefStatus, Derivation, Source, TrustTier } from "../data/types";
 
 export interface Board {
   agents: Agent[];
@@ -14,6 +14,13 @@ export interface Board {
 }
 
 const FETCH_TIMEOUT_MS = 8000;
+
+function requestHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...extra,
+    ...(CONFIG.token ? { Authorization: `Bearer ${CONFIG.token}` } : {}),
+  };
+}
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<{ body: T; response: Response }> {
   // A reachable but unresponsive host must not pin loading or destructive
@@ -65,10 +72,24 @@ const KIND_TO_UI: Record<string, Source["kind"]> = {
 };
 
 interface ApiBoard {
-  agents: { agent_id: string; name: string; region: string; pubkey8: string }[];
-  sources: { source_id: string; kind: string; uri: string; trust_tier: string; region: string }[];
+  agents: { agent_id: string; name: string; region: string; pubkey8: string; signing_algorithm: string }[];
+  sources: {
+    source_id: string;
+    kind: string;
+    uri: string;
+    trust_tier: string;
+    region: string;
+    authority_rank: number;
+    issuer: string;
+  }[];
   beliefs: ApiBelief[];
-  derivations: { child_id: string; parent_id: string; kind: string; score: number | null }[];
+  derivations: {
+    child_id: string;
+    parent_id: string;
+    kind: string;
+    score: number | null;
+    evidence_method: string;
+  }[];
 }
 
 interface ApiBelief {
@@ -82,6 +103,8 @@ interface ApiBelief {
   prev_hash: string;
   sig: string;
   source_id: string | null;
+  authority_rank?: number;
+  origin_source_ids?: string[];
 }
 
 function mapBelief(b: ApiBelief, region: string): Belief {
@@ -97,12 +120,14 @@ function mapBelief(b: ApiBelief, region: string): Belief {
     sig: b.sig.slice(0, 8) + "…",
     createdAt: b.created_at,
     region,
+    authorityRank: b.authority_rank,
+    originSourceIds: b.origin_source_ids,
   };
 }
 
 export async function fetchBoard(): Promise<Board> {
   const { body: raw } = await fetchJson<ApiBoard>(`${CONFIG.forensicsUrl}/board`, {
-    headers: { Accept: "application/json" },
+    headers: requestHeaders({ Accept: "application/json" }),
   });
   const agentRegion = new Map(raw.agents.map((a) => [a.agent_id, a.region]));
   return {
@@ -112,6 +137,7 @@ export async function fetchBoard(): Promise<Board> {
       role: "",
       region: a.region,
       pubkey8: a.pubkey8,
+      signingAlgorithm: a.signing_algorithm,
     })),
     sources: raw.sources.map((s) => ({
       id: s.source_id,
@@ -119,6 +145,8 @@ export async function fetchBoard(): Promise<Board> {
       label: hostOf(s.uri),
       uri: s.uri,
       trust: safeTrust(s.trust_tier),
+      authorityRank: s.authority_rank,
+      issuer: s.issuer,
     })),
     beliefs: raw.beliefs.map((b) => mapBelief(b, agentRegion.get(b.agent_id) ?? "local")),
     derivations: raw.derivations.map((d) => ({
@@ -126,6 +154,7 @@ export async function fetchBoard(): Promise<Board> {
       parentId: d.parent_id,
       kind: d.kind as Derivation["kind"],
       score: d.score ?? 1.0,
+      evidenceMethod: d.evidence_method,
     })),
   };
 }
@@ -145,7 +174,7 @@ export async function fetchPreview(sourceId: string): Promise<PreviewResult> {
     would_flip?: number;
   }>(`${CONFIG.quarantineUrl}/taint/preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: requestHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ source_id: sourceId }),
   });
   return {
@@ -175,7 +204,10 @@ export async function postRecant(sourceId: string, actor = "operator"): Promise<
     inferred_edges?: unknown[];
   }>(`${CONFIG.quarantineUrl}/recant`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: requestHeaders({
+      "Content-Type": "application/json",
+      "Idempotency-Key": `console-${crypto.randomUUID()}`,
+    }),
     body: JSON.stringify({ source_id: sourceId, actor }),
   });
   return {
@@ -186,4 +218,44 @@ export async function postRecant(sourceId: string, actor = "operator"): Promise<
     inferredEdges: (body.inferred_edges ?? []).length,
     primitive: response.headers.get("X-Recant-Primitive"),
   };
+}
+
+interface ApiDecision {
+  decision_id: string;
+  agent_id: string;
+  tool_name: string;
+  support_belief_ids: string[];
+  risk_class: string;
+  required_authority: number;
+  required_authority_label: string;
+  observed_authority: number;
+  observed_authority_label: string;
+  decision: ActionDecision["decision"];
+  reason: string;
+  policy_version: string;
+  created_at: string;
+  sig: string;
+}
+
+export async function fetchActionDecisions(): Promise<ActionDecision[]> {
+  if (!CONFIG.guardUrl) return [];
+  const { body } = await fetchJson<ApiDecision[]>(`${CONFIG.guardUrl}/actions/decisions`, {
+    headers: requestHeaders({ Accept: "application/json" }),
+  });
+  return body.map((decision) => ({
+    id: decision.decision_id,
+    agentId: decision.agent_id,
+    toolName: decision.tool_name,
+    supportBeliefIds: decision.support_belief_ids,
+    riskClass: decision.risk_class,
+    requiredAuthority: decision.required_authority,
+    requiredAuthorityLabel: decision.required_authority_label.replaceAll("_", " "),
+    observedAuthority: decision.observed_authority,
+    observedAuthorityLabel: decision.observed_authority_label.replaceAll("_", " "),
+    decision: decision.decision,
+    reason: decision.reason,
+    policyVersion: decision.policy_version,
+    createdAt: decision.created_at,
+    signature: decision.sig,
+  }));
 }

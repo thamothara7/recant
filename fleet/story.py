@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import sys
+from typing import TypedDict
 
 from services.common.embedder import DIMENSIONS, cosine
 from services.taint_engine.engine import default_threshold
@@ -82,7 +83,16 @@ TAINTED = {"forum_claim", "support_paraphrase", "ops_action"}
 # The pending side effect ops queues on the tainted basis (proof moment 4's
 # local rehearsal): the eviction worker must abort it when forum_thread is
 # recanted, because derived_from overlaps the flipped ids.
-ACTION = {
+
+
+class ActionSpec(TypedDict):
+    agent: str
+    kind: str
+    payload: dict[str, object]
+    derived_from_keys: list[str]
+
+
+ACTION: ActionSpec = {
     "agent": "ops",
     "kind": "refund",
     "payload": {"customer": "#4471", "days": 365, "note": "auto-approve pending refund"},

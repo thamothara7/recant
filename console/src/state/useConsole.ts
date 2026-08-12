@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   AGENTS,
+  ACTION_DECISIONS,
   BELIEFS,
   CLUSTER,
   DERIVATIONS,
@@ -11,13 +12,14 @@ import {
 import { POISONED_SOURCE, STORY } from "../data/story";
 import type {
   Belief,
+  ActionDecision,
   BeliefStatus,
   ChangefeedEvent,
   ClusterNode,
   JudgePrimitive,
   PrimitiveKind,
 } from "../data/types";
-import { fetchBoard, postRecant, type Board } from "../lib/api";
+import { fetchActionDecisions, fetchBoard, postRecant, type Board } from "../lib/api";
 import { CONFIG } from "../lib/config";
 import { clockUtc } from "../lib/format";
 
@@ -69,6 +71,9 @@ export const useDisplayStatuses = () =>
 export const useActiveBoard = (): Board =>
   useConsole((s) => (s.mode === "story" ? FIXTURE_BOARD : s.board));
 
+export const useActiveDecisions = (): ActionDecision[] =>
+  useConsole((s) => (s.mode === "story" || !s.live ? ACTION_DECISIONS : s.decisions));
+
 // The taint closure of a source over the active board's derivation edges.
 export function closureOverBoard(board: Board, sourceId: string): string[] {
   const direct = board.beliefs.filter((b) => b.sourceId === sourceId).map((b) => b.id);
@@ -112,6 +117,7 @@ interface ConsoleState {
   board: Board;
   boardLoaded: boolean;
   boardError: string | null;
+  decisions: ActionDecision[];
   // The live board's statuses at first load (pre any recant): the "past" the
   // AOST scrubber rewinds to. Null until the first successful live fetch.
   liveSeedStatuses: Record<string, BeliefStatus> | null;
@@ -171,6 +177,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   board: FIXTURE_BOARD,
   boardLoaded: !CONFIG.live, // fixtures are ready synchronously
   boardError: null,
+  decisions: ACTION_DECISIONS,
   liveSeedStatuses: null,
   liveRecantedSource: null,
 
@@ -240,10 +247,14 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   loadBoard: async () => {
     if (!CONFIG.live) return true;
     try {
-      const board = await fetchBoard();
+      const [board, decisions] = await Promise.all([
+        fetchBoard(),
+        CONFIG.liveGuard ? fetchActionDecisions().catch(() => []) : Promise.resolve([]),
+      ]);
       const seed = statusesOf(board.beliefs);
       set((s) => ({
         board,
+        decisions,
         statuses: seed,
         boardLoaded: true,
         boardError: null,

@@ -3,6 +3,7 @@ rows produces N parsed events and correctly batched PutEvents calls against an
 injected fake client. Deployment is U3; the wire format is pinned now."""
 
 import base64
+import hashlib
 import json
 from uuid import uuid4
 
@@ -26,7 +27,10 @@ def recant_row(event_id=None, incident_id=None, belief_ids=None):
                     "source_id": str(SOURCE),
                     "actor": "auditor",
                     "evictions": [
-                        {"agent_id": str(AGENT), "belief_ids": [str(b) for b in (belief_ids or [uuid4()])]}
+                        {
+                            "agent_id": str(AGENT),
+                            "belief_ids": [str(b) for b in (belief_ids or [uuid4()])],
+                        }
                     ],
                 },
                 "created_at": "2026-07-10T00:00:00Z",
@@ -66,7 +70,16 @@ def test_deletes_and_foreign_kinds_are_skipped():
     rows = [
         recant_row(),
         {"value": {"after": None}},  # delete emission
-        {"value": {"after": {"event_id": str(uuid4()), "kind": "eviction", "incident_id": None, "payload": {}}}},
+        {
+            "value": {
+                "after": {
+                    "event_id": str(uuid4()),
+                    "kind": "eviction",
+                    "incident_id": None,
+                    "payload": {},
+                }
+            }
+        },
     ]
     events = parse_webhook_envelope(envelope(rows))
     assert len(events) == 1
@@ -124,3 +137,18 @@ def test_partial_putevents_failure_is_not_acknowledged():
     body = json.dumps(envelope([recant_row()]))
     with pytest.raises(RuntimeError, match="rejected 1"):
         handler({"body": body}, events_client=fake)
+
+
+def test_production_webhook_requires_matching_authorization(monkeypatch):
+    header = "Basic dGVzdDpzZWNyZXQ="
+    monkeypatch.setenv("RECANT_ENV", "production")
+    monkeypatch.setenv("RECANT_WEBHOOK_AUTH_SHA256", hashlib.sha256(header.encode()).hexdigest())
+    body = json.dumps(envelope([recant_row()]))
+    rejected = handler({"body": body}, events_client=FakeEvents())
+    assert rejected["statusCode"] == 401
+
+    accepted = handler(
+        {"body": body, "headers": {"Authorization": header}},
+        events_client=FakeEvents(),
+    )
+    assert accepted["statusCode"] == 200

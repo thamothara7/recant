@@ -8,10 +8,10 @@ cosine. The taint threshold is pinned per-test via RECANT_TAINT_THRESHOLD.
 import json
 import math
 import threading
-import time
 
 import pytest
 
+from services.common.auth import DEFAULT_TENANT_ID
 from tests.integration.conftest import requires_db
 
 pytestmark = requires_db
@@ -119,7 +119,9 @@ def test_explicit_closure_flips_seed_and_descendants(fx, qs):
     out = r.json()
     assert out["belief_count"] == 3
 
-    st = statuses([poison["belief_id"], child["belief_id"], grandchild["belief_id"], clean["belief_id"]])
+    st = statuses(
+        [poison["belief_id"], child["belief_id"], grandchild["belief_id"], clean["belief_id"]]
+    )
     assert st[poison["belief_id"]] == "quarantined"
     assert st[child["belief_id"]] == "quarantined"
     assert st[grandchild["belief_id"]] == "quarantined"
@@ -141,7 +143,8 @@ def test_implicit_closure_catches_paraphrase_and_materializes_edge(fx, qs):
     assert st[unrelated["belief_id"]] == "active"
 
     edges = [
-        e for e in out["inferred_edges"]
+        e
+        for e in out["inferred_edges"]
         if e["child_id"] == paraphrase["belief_id"] and e["parent_id"] == poison["belief_id"]
     ]
     assert len(edges) == 1
@@ -161,16 +164,10 @@ def test_implicit_closure_catches_paraphrase_and_materializes_edge(fx, qs):
 def test_omitted_embeddings_are_generated_for_semantic_closure(fx, qs):
     """The public client omits embeddings by default. The gateway must embed
     those writes or Recant silently loses its reworded-copy guarantee."""
-    poison = fx.belief(
-        "researcher", "the refund window is 365 days", source="forum"
-    )
-    paraphrase = fx.belief(
-        "support", "the refund window is now 365 days for everyone"
-    )
+    poison = fx.belief("researcher", "the refund window is 365 days", source="forum")
+    paraphrase = fx.belief("support", "the refund window is now 365 days for everyone")
 
-    out = qs.post(
-        "/taint/preview", json={"source_id": fx.sources["forum"]}
-    ).json()
+    out = qs.post("/taint/preview", json={"source_id": fx.sources["forum"]}).json()
     assert poison["belief_id"] in out["closure_ids"]
     assert paraphrase["belief_id"] in out["closure_ids"]
     assert out["would_flip"] == 2
@@ -181,24 +178,81 @@ def test_semantic_inference_does_not_override_independent_source(fx, qs):
 
     poisoned_text = "the refund window is 365 days"
     trusted_text = "the refund window is 30 days"
-    assert cosine(
-        HashEmbedder().embed(poisoned_text), HashEmbedder().embed(trusted_text)
-    ) >= float(THRESHOLD)
-
-    fx.belief("researcher", poisoned_text, source="forum")
-    trusted = fx.belief(
-        "support", trusted_text, source="vendor"
+    assert cosine(HashEmbedder().embed(poisoned_text), HashEmbedder().embed(trusted_text)) >= float(
+        THRESHOLD
     )
 
-    out = qs.post(
-        "/taint/preview", json={"source_id": fx.sources["forum"]}
-    ).json()
+    fx.belief("researcher", poisoned_text, source="forum")
+    trusted = fx.belief("support", trusted_text, source="vendor")
+
+    out = qs.post("/taint/preview", json={"source_id": fx.sources["forum"]}).json()
     assert trusted["belief_id"] not in out["closure_ids"]
     assert out["would_flip"] == 1
 
 
+def test_exact_cross_source_copy_cannot_evade_semantic_closure(fx, qs):
+    poisoned = fx.belief("researcher", "the refund window is 365 days", source="forum")
+    copied = fx.belief("support", "the refund window is 365 days", source="vendor")
+
+    out = qs.post("/taint/preview", json={"source_id": fx.sources["forum"]}).json()
+    assert poisoned["belief_id"] in out["closure_ids"]
+    assert copied["belief_id"] in out["closure_ids"]
+    edges = [edge for edge in out["inferred_edges"] if edge["child_id"] == copied["belief_id"]]
+    assert edges == [
+        {
+            "child_id": copied["belief_id"],
+            "parent_id": poisoned["belief_id"],
+            "score": 1.0,
+            "evidence_method": "exact_content",
+            "evidence_model": None,
+            "evidence_version": "v1",
+        }
+    ]
+
+
+def test_cross_source_entailment_respects_evidence_direction(fx, qs):
+    poisoned = fx.belief(
+        "researcher",
+        "refunds are allowed for 365 days",
+        source="forum",
+        embedding=axis(0),
+    )
+    sourced = fx.belief(
+        "support",
+        "loyal customers may receive refunds for 365 days",
+        source="vendor",
+        embedding=axis(0),
+    )
+
+    from services.common.db import get_pool
+
+    with get_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO semantic_relations"
+            " (tenant_id, left_belief_id, right_belief_id, relation, confidence,"
+            " evidence_method, evidence_version)"
+            " VALUES (%s, %s, %s, 'entails', 0.99, 'test_nli', 'v1')",
+            (DEFAULT_TENANT_ID, sourced["belief_id"], poisoned["belief_id"]),
+        )
+
+    reverse = qs.post("/taint/preview", json={"source_id": fx.sources["forum"]}).json()
+    assert sourced["belief_id"] not in reverse["closure_ids"]
+
+    with get_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO semantic_relations"
+            " (tenant_id, left_belief_id, right_belief_id, relation, confidence,"
+            " evidence_method, evidence_version)"
+            " VALUES (%s, %s, %s, 'entails', 0.99, 'test_nli', 'v1')",
+            (DEFAULT_TENANT_ID, poisoned["belief_id"], sourced["belief_id"]),
+        )
+
+    forward = qs.post("/taint/preview", json={"source_id": fx.sources["forum"]}).json()
+    assert sourced["belief_id"] in forward["closure_ids"]
+
+
 def test_transitive_closure_through_inferred_member(fx, qs):
-    poison = fx.belief("researcher", "poisoned claim", source="forum", embedding=axis(0))
+    fx.belief("researcher", "poisoned claim", source="forum", embedding=axis(0))
     paraphrase = fx.belief("support", "reworded claim", embedding=mix(0, 1, 0.9))
     downstream = fx.belief("ops", "action from paraphrase", parents=[paraphrase["belief_id"]])
 
@@ -241,10 +295,9 @@ def test_unrecorded_paraphrase_between_source_creation_and_first_citation_is_cau
 
 
 def test_adaptive_k_widens_past_near_duplicate_crowd(fx, qs, monkeypatch):
-    poison = fx.belief("researcher", "poisoned claim", source="forum", embedding=axis(0))
+    fx.belief("researcher", "poisoned claim", source="forum", embedding=axis(0))
     crowd = [
-        fx.belief("support", f"near duplicate {i}", embedding=mix(0, 1, 0.95))
-        for i in range(8)
+        fx.belief("support", f"near duplicate {i}", embedding=mix(0, 1, 0.95)) for i in range(8)
     ]
     farther = fx.belief("ops", "paraphrase past the crowd", embedding=mix(0, 1, 0.70))
 
@@ -261,10 +314,10 @@ def test_round_cap_sets_rounds_capped_and_leaves_closure_incomplete(fx):
     """The 10-round runaway guard: with max_rounds=1 the implicit hit is found
     but its explicit child is never expanded, so rounds_capped is True (distinct
     from kNN truncation) and the closure is knowingly incomplete."""
-    from services.taint_engine.engine import compute_closure
     from services.common.db import get_pool
+    from services.taint_engine.engine import compute_closure
 
-    poison = fx.belief("researcher", "poisoned claim", source="forum", embedding=axis(0))
+    fx.belief("researcher", "poisoned claim", source="forum", embedding=axis(0))
     paraphrase = fx.belief("support", "reworded claim", embedding=mix(0, 1, 0.9))
     child = fx.belief("ops", "explicit child of paraphrase", parents=[paraphrase["belief_id"]])
 
@@ -281,8 +334,8 @@ def test_round_cap_sets_rounds_capped_and_leaves_closure_incomplete(fx):
 def test_knn_truncation_sets_knn_truncated_not_rounds_capped(fx):
     """A near-duplicate crowd larger than max_k leaves the kNN boundary hot at the
     cap: knn_truncated is True while rounds_capped stays False."""
-    from services.taint_engine.engine import compute_closure
     from services.common.db import get_pool
+    from services.taint_engine.engine import compute_closure
 
     fx.belief("researcher", "poisoned claim", source="forum", embedding=axis(0))
     for i in range(4):
@@ -340,9 +393,9 @@ def test_recant_action_is_attested(fx, qs):
     out = qs.post("/recant", json={"source_id": fx.sources["forum"], "actor": "auditor"}).json()
 
     with get_pool().connection() as conn:
-        belief_count, actor, sig, flipped, source_id, incident_created = conn.execute(
+        belief_count, actor, sig, flipped, source_id, incident_created, version = conn.execute(
             "SELECT qa.belief_count, qa.actor, qa.sig, qa.newly_flipped_ids,"
-            " i.source_id, i.created_at"
+            " i.source_id, i.created_at, qa.attestation_version"
             " FROM quarantine_actions qa JOIN incidents i USING (incident_id)"
             " WHERE qa.incident_id = %s",
             (out["incident_id"],),
@@ -355,6 +408,8 @@ def test_recant_action_is_attested(fx, qs):
         belief_count=belief_count,
         actor=actor,
         ts=incident_created,
+        tenant_id=DEFAULT_TENANT_ID,
+        attestation_version=version,
     )
     pubkey = dev_action_signer_for(actor).public_key_bytes()
     assert verify_signature(pubkey, action_digest(payload), bytes(sig))
@@ -372,8 +427,9 @@ def test_action_signature_is_domain_separated_from_agent_keys(fx, qs):
     out = qs.post("/recant", json={"source_id": fx.sources["forum"], "actor": "researcher"}).json()
 
     with get_pool().connection() as conn:
-        belief_count, sig, flipped, source_id, incident_created = conn.execute(
-            "SELECT qa.belief_count, qa.sig, qa.newly_flipped_ids, i.source_id, i.created_at"
+        belief_count, sig, flipped, source_id, incident_created, version = conn.execute(
+            "SELECT qa.belief_count, qa.sig, qa.newly_flipped_ids, i.source_id, i.created_at,"
+            " qa.attestation_version"
             " FROM quarantine_actions qa JOIN incidents i USING (incident_id)"
             " WHERE qa.incident_id = %s",
             (out["incident_id"],),
@@ -386,6 +442,8 @@ def test_action_signature_is_domain_separated_from_agent_keys(fx, qs):
         belief_count=belief_count,
         actor="researcher",
         ts=incident_created,
+        tenant_id=DEFAULT_TENANT_ID,
+        attestation_version=version,
     )
     agent_pubkey = dev_signer_for("researcher").public_key_bytes()
     assert not verify_signature(agent_pubkey, action_digest(payload), bytes(sig))
@@ -441,9 +499,10 @@ def test_preview_is_read_only(fx, qs):
 
     with get_pool().connection() as conn:
         assert conn.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
-        assert conn.execute(
-            "SELECT count(*) FROM derivations WHERE kind = 'inferred'"
-        ).fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT count(*) FROM derivations WHERE kind = 'inferred'").fetchone()[0]
+            == 0
+        )
     assert statuses([poison["belief_id"]])[poison["belief_id"]] == "active"
 
 
@@ -472,8 +531,9 @@ def test_knn_query_uses_vector_index(fx, qs):
             r[0]
             for r in conn.execute(
                 "EXPLAIN SELECT belief_id, status, created_at, embedding <=> %s::vector"
-                " FROM beliefs ORDER BY embedding <=> %s::vector LIMIT 20",
-                (probe, probe),
+                " FROM beliefs WHERE tenant_id = %s"
+                " ORDER BY embedding <=> %s::vector LIMIT 20",
+                (probe, DEFAULT_TENANT_ID, probe),
             ).fetchall()
         )
     assert "vector search" in plan, plan
@@ -551,7 +611,9 @@ def test_atomicity_concurrent_reader_never_sees_partial_flip(fx, qs):
     t.join(timeout=15)
 
     assert r.status_code == 200
-    assert pre_commit["reader_done"], "reader never completed before commit (liveness, not atomicity)"
+    assert pre_commit["reader_done"], (
+        "reader never completed before commit (liveness, not atomicity)"
+    )
     assert observed == [0], f"reader saw partial/early flip: {observed}"
     st = statuses(ids)
     assert all(v == "quarantined" for v in st.values())

@@ -10,6 +10,12 @@
 
 const forensics = import.meta.env.VITE_FORENSICS_URL?.replace(/\/$/, "");
 const quarantine = import.meta.env.VITE_QUARANTINE_URL?.replace(/\/$/, "");
+const guard = import.meta.env.VITE_GUARD_URL?.replace(/\/$/, "");
+const token = import.meta.env.VITE_RECANT_TOKEN;
+
+if (import.meta.env.PROD && token) {
+  throw new Error("VITE_RECANT_TOKEN must not be embedded in a production browser bundle");
+}
 
 export const CONFIG = {
   /** Explore reads come from the live board when forensics is configured. */
@@ -18,4 +24,7 @@ export const CONFIG = {
   /** The recant action posts here only when it is set; else it simulates. */
   quarantineUrl: quarantine ?? "",
   liveRecant: Boolean(forensics && quarantine),
+  guardUrl: guard ?? "",
+  liveGuard: Boolean(guard),
+  token: token ?? "",
 };

@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type-check security-critical modules
+        run: >-
+          uv run mypy
+          services/common/auth.py
+          services/common/authority.py
+          services/common/idempotency.py
+          services/common/attestation.py
+          services/attest_gateway/chain.py
+          services/attest_gateway/signer.py
+          services/guard
+          services/forensics/checkpoint.py
+          services/taint_engine/relations.py
+          recant_client.py
+
+      - name: Audit Python dependencies
+        run: uv run pip-audit --local
+
+      - name: Run unit tests without a database
+        run: env -u DATABASE_URL uv run pytest tests/unit -q
+
+      - name: Start pinned CockroachDB
+        run: >-
+          docker run --detach --name recant-cockroach --hostname recant-cockroach
+          --publish 127.0.0.1:26257:26257
+          cockroachdb/cockroach:v26.2.5
+          start --insecure --join=recant-cockroach:26257
+          --listen-addr=0.0.0.0:26257
+          --advertise-addr=recant-cockroach:26257
+          --http-addr=0.0.0.0:8080
+          --cache=128MiB --max-sql-memory=128MiB
+
+      - name: Wait for CockroachDB and create database
+        run: |
+          for attempt in {1..30}; do
+            if docker exec recant-cockroach ./cockroach init --insecure --host=localhost:26257 >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs recant-cockroach
+              exit 1
+            fi
+            sleep 2
+          done
+          for attempt in {1..30}; do
+            if docker exec recant-cockroach ./cockroach sql --insecure --host=localhost:26257 --execute 'SELECT 1' >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs recant-cockroach
+              exit 1
+            fi
+            sleep 2
+          done
+          docker exec recant-cockroach ./cockroach sql --insecure --execute 'CREATE DATABASE IF NOT EXISTS recant'
+
+      - name: Apply migrations
+        env:
+          DATABASE_URL: postgresql://root@localhost:26257/recant?sslmode=disable
+        run: uv run python -m db.migrate
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://root@localhost:26257/recant?sslmode=disable
+        run: uv run pytest tests/integration -q
+
+      - name: Validate deployment scripts
+        run: bash -n ops/run-services.sh fanout/iac/deploy.sh fanout/iac/package.sh
+
+  console:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
+
+      - name: Build console
+        run: npm run build

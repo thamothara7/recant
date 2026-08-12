@@ -2,8 +2,9 @@
 malformed recant events fail loudly (a producer bug, never fixed up silently),
 and foreign kinds pass through as None without error."""
 
+from uuid import uuid4
+
 import pytest
-from uuid import UUID, uuid4
 
 from fanout.handler import MalformedEvent, parse_event
 

@@ -1,11 +1,10 @@
 """Quarantines are themselves attested (spec section 6).
 
-The action signature is Ed25519 over SHA-256 of a canonical JSON payload, using
-the same encoding discipline as the belief chain (sorted keys, no whitespace,
-sorted ID lists). Every signed field is persisted durably on the action/incident
-rows (quarantine_actions.newly_flipped_ids + incidents.source_id/created_at), so
-the signature is recomputable from the stored rows alone by a forensics verifier
-that never saw the HTTP response or the outbox event.
+The action signature is over SHA-256 of a canonical JSON payload, using
+deterministic Ed25519 locally and AWS KMS ECDSA in production. Every signed
+field is persisted durably on the action and incident rows, so a forensics
+verifier can reconstruct it without the HTTP response or outbox event. V2 also
+binds the tenant and payload type while v1 remains available for old rows.
 """
 
 from __future__ import annotations
@@ -24,8 +23,10 @@ def canonical_action_payload(
     belief_count: int,
     actor: str,
     ts: datetime,
+    tenant_id: UUID | None = None,
+    attestation_version: str = "v1",
 ) -> bytes:
-    doc = {
+    doc: dict[str, object] = {
         "incident_id": str(incident_id),
         "source_id": str(source_id),
         "newly_flipped_ids": sorted(str(b) for b in newly_flipped_ids),
@@ -33,6 +34,15 @@ def canonical_action_payload(
         "actor": actor,
         "ts": ts.isoformat(),
     }
+    if attestation_version == "v2" and tenant_id is not None:
+        doc.update(
+            {
+                "type": "recant.quarantine-action.v2",
+                "tenant_id": str(tenant_id),
+            }
+        )
+    elif attestation_version != "v1":
+        raise ValueError(f"unsupported or incomplete attestation version: {attestation_version}")
     return json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
 
 

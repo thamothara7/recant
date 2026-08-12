@@ -19,7 +19,6 @@ profile (RECANT_INVESTIGATOR_MODEL overrides).
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 

@@ -8,7 +8,7 @@ receipt and delivery ledger record it, exactly once per consumer.
 """
 
 import os
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -56,7 +56,9 @@ def db():
 
 
 def recant(qs, fleet, actor="auditor"):
-    r = qs.post("/recant", json={"source_id": str(fleet.source_ids["forum_thread"]), "actor": actor})
+    r = qs.post(
+        "/recant", json={"source_id": str(fleet.source_ids["forum_thread"]), "actor": actor}
+    )
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -259,12 +261,16 @@ def test_same_consumer_worker_race_loses_without_crashing(fleet, qs):
 
     with db() as conn:
         # the rolled-back retry added neither a second delivery nor a second receipt
-        assert conn.execute(
-            "SELECT count(*) FROM fanout_deliveries WHERE consumer = %s", (CONSUMER,)
-        ).fetchone()[0] == 1
-        assert conn.execute(
-            "SELECT count(*) FROM memory_events WHERE kind = 'eviction'"
-        ).fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT count(*) FROM fanout_deliveries WHERE consumer = %s", (CONSUMER,)
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            conn.execute("SELECT count(*) FROM memory_events WHERE kind = 'eviction'").fetchone()[0]
+            == 1
+        )
 
 
 def test_crash_between_apply_and_delivery_redelivers(fleet, qs, monkeypatch):
@@ -286,7 +292,10 @@ def test_crash_between_apply_and_delivery_redelivers(fleet, qs, monkeypatch):
         # the whole transaction rolled back: memory intact, action pending,
         # no receipt, no delivery
         assert len(memory_ids(conn)) == len(fleet.belief_ids)
-        assert conn.execute("SELECT count(*) FROM memory_events WHERE kind='eviction'").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT count(*) FROM memory_events WHERE kind='eviction'").fetchone()[0]
+            == 0
+        )
         assert conn.execute("SELECT count(*) FROM fanout_deliveries").fetchone()[0] == 0
         assert conn.execute("SELECT status FROM agent_actions").fetchone()[0] == "pending"
 

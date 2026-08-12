@@ -2,8 +2,6 @@
 
 import time
 
-import pytest
-
 from tests.integration.conftest import requires_db
 
 
@@ -63,9 +61,7 @@ class TestAOSTBeliefs:
         )
         assert recant_r.status_code == 200
         # Query at the past timestamp -> should be active
-        r = forensics_client.get(
-            f"/agents/{agent['agent_id']}/beliefs", params={"as_of": as_of}
-        )
+        r = forensics_client.get(f"/agents/{agent['agent_id']}/beliefs", params={"as_of": as_of})
         assert r.status_code == 200
         assert r.json()["beliefs"][0]["status"] == "active"
         # Query current -> should be quarantined
@@ -101,21 +97,21 @@ class TestAOSTBeliefs:
 @requires_db
 class TestCustodyChain:
     def test_chain(self, client, forensics_client):
-        agent = client.post(
-            "/agents", json={"name": f"chain-{time.time_ns()}"}
-        ).json()
+        agent = client.post("/agents", json={"name": f"chain-{time.time_ns()}"}).json()
         b1 = _seed_belief(client, agent["agent_id"], "first belief")
         b2 = _seed_belief(
-            client, agent["agent_id"], "second belief",
+            client,
+            agent["agent_id"],
+            "second belief",
             parent_ids=[b1["belief_id"]],
         )
-        b3 = _seed_belief(
-            client, agent["agent_id"], "third belief",
+        _seed_belief(
+            client,
+            agent["agent_id"],
+            "third belief",
             parent_ids=[b2["belief_id"]],
         )
-        r = forensics_client.get(
-            f"/agents/{agent['agent_id']}/custody-chain"
-        )
+        r = forensics_client.get(f"/agents/{agent['agent_id']}/custody-chain")
         assert r.status_code == 200
         data = r.json()
         assert data["chain_length"] == 3
@@ -123,10 +119,7 @@ class TestCustodyChain:
         assert data["steps"][0]["belief"]["seq"] == 1
         assert data["steps"][2]["belief"]["seq"] == 3
         # Second belief should have first as parent
-        assert any(
-            p["parent_id"] == b1["belief_id"]
-            for p in data["steps"][1]["parents"]
-        )
+        assert any(p["parent_id"] == b1["belief_id"] for p in data["steps"][1]["parents"])
 
     def test_direct_db_tamper_is_detected(self, client, forensics_client):
         """A direct UPDATE bypassing the gateway must flip custody-chain and
@@ -136,12 +129,12 @@ class TestCustodyChain:
         tampered rows. This is the judge-facing W4 tamper-detection claim."""
         from services.common.db import get_pool
 
-        agent = client.post(
-            "/agents", json={"name": f"tamper-{time.time_ns()}"}
-        ).json()
+        agent = client.post("/agents", json={"name": f"tamper-{time.time_ns()}"}).json()
         b1 = _seed_belief(client, agent["agent_id"], "first belief")
         _seed_belief(
-            client, agent["agent_id"], "second belief",
+            client,
+            agent["agent_id"],
+            "second belief",
             parent_ids=[b1["belief_id"]],
         )
         with get_pool().connection() as conn:
@@ -163,9 +156,7 @@ class TestCustodyChain:
         sig_valid=False, and the custody chain reports valid=False."""
         from services.common.db import get_pool
 
-        agent = client.post(
-            "/agents", json={"name": f"sig-{time.time_ns()}"}
-        ).json()
+        agent = client.post("/agents", json={"name": f"sig-{time.time_ns()}"}).json()
         b1 = _seed_belief(client, agent["agent_id"], "only belief")
         with get_pool().connection() as conn:
             conn.execute(
@@ -180,20 +171,44 @@ class TestCustodyChain:
         assert p.json()["chain_valid"] is True
         assert p.json()["sig_valid"] is False
 
+    def test_substituted_agent_signer_is_not_trusted(self, client, forensics_client):
+        """A valid signature from a replacement key is not the registered identity."""
+        from services.attest_gateway.signer import dev_signer_for
+        from services.common.db import get_pool
+
+        agent = client.post("/agents", json={"name": f"identity-{time.time_ns()}"}).json()
+        belief = _seed_belief(client, agent["agent_id"], "signed by the original identity")
+        replacement = dev_signer_for("replacement-agent")
+        with get_pool().connection() as conn:
+            row = conn.execute(
+                "SELECT hash FROM beliefs WHERE belief_id = %s", (belief["belief_id"],)
+            ).fetchone()
+            assert row is not None
+            conn.execute(
+                "UPDATE beliefs SET sig = %s WHERE belief_id = %s",
+                (replacement.sign(bytes(row[0])), belief["belief_id"]),
+            )
+            conn.execute(
+                "UPDATE agents SET pubkey = %s WHERE agent_id = %s",
+                (replacement.public_key_bytes(), agent["agent_id"]),
+            )
+
+        chain = forensics_client.get(f"/agents/{agent['agent_id']}/custody-chain").json()
+        provenance = forensics_client.get(f"/beliefs/{belief['belief_id']}/provenance").json()
+        assert chain["valid"] is False
+        assert provenance["chain_valid"] is True
+        assert provenance["sig_valid"] is False
+
     def test_tail_truncation_is_detected(self, client, forensics_client):
         """A valid prefix is not a valid full chain when the signed head says a
         later row existed. The forensics endpoint must check the agent head."""
         from services.common.db import get_pool
 
-        agent = client.post(
-            "/agents", json={"name": f"tail-{time.time_ns()}"}
-        ).json()
+        agent = client.post("/agents", json={"name": f"tail-{time.time_ns()}"}).json()
         _seed_belief(client, agent["agent_id"], "first belief")
         second = _seed_belief(client, agent["agent_id"], "second belief")
         with get_pool().connection() as conn:
-            conn.execute(
-                "DELETE FROM beliefs WHERE belief_id = %s", (second["belief_id"],)
-            )
+            conn.execute("DELETE FROM beliefs WHERE belief_id = %s", (second["belief_id"],))
 
         r = forensics_client.get(f"/agents/{agent['agent_id']}/custody-chain")
         assert r.status_code == 200
@@ -220,9 +235,7 @@ class TestIncidentSummary:
         assert len(data["actions"]) >= 1
         assert data["actions"][0]["sig_valid"] is True
 
-    def test_forged_action_reports_sig_invalid(
-        self, client, forensics_client, quarantine_client
-    ):
+    def test_forged_action_reports_sig_invalid(self, client, forensics_client, quarantine_client):
         """The signed action payload binds newly_flipped_ids (decision 14).
         Editing that column after the fact must make the reconstructed digest
         diverge from the stored signature, so /incidents reports sig_valid=False
@@ -256,6 +269,23 @@ class TestIncidentSummary:
         aff = forensics_client.get(f"/incidents/{incident_id}/affidavit").json()
         assert "INVALID" in aff["text"]
 
+    def test_action_rejects_substituted_signer(self, client, forensics_client, quarantine_client):
+        from services.common.db import get_pool
+
+        _, source, _ = _seed_scenario(client)
+        recant = quarantine_client.post(
+            "/recant", json={"source_id": source["source_id"], "actor": "operator"}
+        ).json()
+        with get_pool().connection() as conn:
+            conn.execute(
+                "UPDATE quarantine_actions SET signer_key_id = 'substituted'"
+                " WHERE incident_id = %s",
+                (recant["incident_id"],),
+            )
+
+        summary = forensics_client.get(f"/incidents/{recant['incident_id']}").json()
+        assert summary["actions"][0]["sig_valid"] is False
+
     def test_unknown_incident(self, forensics_client):
         from uuid import uuid4
 
@@ -285,17 +315,18 @@ class TestAffidavit:
 @requires_db
 class TestBoard:
     def test_board_returns_full_graph(self, client, forensics_client):
-        agent = client.post(
-            "/agents", json={"name": f"board-{time.time_ns()}"}
-        ).json()
+        agent = client.post("/agents", json={"name": f"board-{time.time_ns()}"}).json()
         source = client.post(
             "/sources",
             json={"kind": "web_scrape", "uri": "https://example.com/b", "trust_tier": "untrusted"},
         ).json()
         b1 = _seed_belief(client, agent["agent_id"], "board root belief")
         _seed_belief(
-            client, agent["agent_id"], "board child belief",
-            source_id=source["source_id"], parent_ids=[b1["belief_id"]],
+            client,
+            agent["agent_id"],
+            "board child belief",
+            source_id=source["source_id"],
+            parent_ids=[b1["belief_id"]],
         )
 
         r = forensics_client.get("/board")
@@ -319,6 +350,54 @@ class TestBoard:
         assert r.status_code == 200
         for key in ("agents", "sources", "beliefs", "derivations"):
             assert isinstance(r.json()[key], list)
+
+
+@requires_db
+class TestCustodyCheckpoints:
+    def test_checkpoint_detects_later_chain_head(self, client, forensics_client, monkeypatch):
+        monkeypatch.delenv("RECANT_CHECKPOINT_BUCKET", raising=False)
+        agent = client.post("/agents", json={"name": f"checkpoint-{time.time_ns()}"}).json()
+        _seed_belief(client, agent["agent_id"], "first checkpointed belief")
+
+        created = forensics_client.post("/checkpoints")
+        assert created.status_code == 201, created.text
+        checkpoint = created.json()
+        assert checkpoint["leaf_count"] == 1
+
+        verified = forensics_client.get(f"/checkpoints/{checkpoint['checkpoint_id']}/verify").json()
+        assert verified == {
+            "checkpoint_id": checkpoint["checkpoint_id"],
+            "signature_valid": True,
+            "merkle_root_valid": True,
+            "current_root_matches": True,
+            "external_copy_valid": None,
+        }
+
+        _seed_belief(client, agent["agent_id"], "belief after checkpoint")
+        stale = forensics_client.get(f"/checkpoints/{checkpoint['checkpoint_id']}/verify").json()
+        assert stale["signature_valid"] is True
+        assert stale["merkle_root_valid"] is True
+        assert stale["current_root_matches"] is False
+
+        next_checkpoint = forensics_client.post("/checkpoints").json()
+        assert next_checkpoint["previous_root_hash"] == checkpoint["root_hash"]
+        latest = forensics_client.get("/checkpoints/latest").json()
+        assert latest["checkpoint_id"] == next_checkpoint["checkpoint_id"]
+
+    def test_checkpoint_rejects_substituted_signer(self, forensics_client, monkeypatch):
+        from services.common.db import get_pool
+
+        monkeypatch.delenv("RECANT_CHECKPOINT_BUCKET", raising=False)
+        checkpoint = forensics_client.post("/checkpoints").json()
+        with get_pool().connection() as conn:
+            conn.execute(
+                "UPDATE custody_checkpoints SET signer_key_id = 'substituted'"
+                " WHERE checkpoint_id = %s",
+                (checkpoint["checkpoint_id"],),
+            )
+
+        verified = forensics_client.get(f"/checkpoints/{checkpoint['checkpoint_id']}/verify").json()
+        assert verified["signature_valid"] is False
 
 
 @requires_db
@@ -356,6 +435,7 @@ class TestArchive:
         assert f"incidents/{incident_id}/affidavit.txt" in data["keys"]
         assert any(k.startswith(f"incidents/{incident_id}/custody/") for k in data["keys"])
         assert len(puts) == len(data["keys"])
+        assert all(item["ServerSideEncryption"] == "AES256" for item in puts)
 
         import json as _json
 
@@ -385,9 +465,7 @@ class TestArchive:
 @requires_db
 class TestProvenance:
     def test_provenance(self, client, forensics_client):
-        agent = client.post(
-            "/agents", json={"name": f"prov-{time.time_ns()}"}
-        ).json()
+        agent = client.post("/agents", json={"name": f"prov-{time.time_ns()}"}).json()
         source = client.post(
             "/sources",
             json={
@@ -397,7 +475,9 @@ class TestProvenance:
             },
         ).json()
         belief = _seed_belief(
-            client, agent["agent_id"], "provenance test",
+            client,
+            agent["agent_id"],
+            "provenance test",
             source_id=source["source_id"],
         )
 

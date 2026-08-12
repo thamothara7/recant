@@ -28,8 +28,9 @@ from typing import Any, Callable
 from uuid import UUID
 
 import psycopg
+from psycopg import sql as psycopg_sql
 
-from services.common.db import get_pool
+from services.common.db import get_pool, tenant_role_name, tenant_roles_enabled
 from services.common.logging import configure
 
 log = configure("agent.readonly_sql")
@@ -100,10 +101,18 @@ class ReadOnlySQL:
         *,
         conn_factory: Callable[[], Any] | None = None,
         max_rows: int = 100,
+        tenant_id: UUID | None = None,
     ) -> None:
         # conn_factory is an injection seam for tests; production pulls from the pool.
         self._conn_factory = conn_factory
         self.max_rows = max_rows
+        configured_tenant = os.environ.get("RECANT_TENANT_ID")
+        try:
+            self.tenant_id = tenant_id or (UUID(configured_tenant) if configured_tenant else None)
+        except ValueError as exc:
+            raise RuntimeError("RECANT_TENANT_ID must be a UUID") from exc
+        if tenant_roles_enabled() and self.tenant_id is None:
+            raise RuntimeError("RECANT_TENANT_ID is required when database RLS is enabled")
 
     def run(self, sql: str) -> dict:
         """Validate, execute read-only, audit-log, and return {columns, rows, truncated}."""
@@ -119,12 +128,19 @@ class ReadOnlySQL:
         with conn.transaction():
             # DB-enforced read-only: rejects any write even if the allowlist is bypassed.
             conn.execute("SET TRANSACTION READ ONLY")
+            if tenant_roles_enabled():
+                assert self.tenant_id is not None
+                conn.execute(
+                    psycopg_sql.SQL("SET LOCAL ROLE {}").format(
+                        psycopg_sql.Identifier(tenant_role_name(self.tenant_id))
+                    )
+                )
             cur = conn.execute(query)
             cols = [d.name for d in cur.description] if cur.description else []
             raw = cur.fetchmany(self.max_rows + 1)
         truncated = len(raw) > self.max_rows
         rows = [
-            {c: _cell(c, v) for c, v in zip(cols, r)} for r in raw[: self.max_rows]
+            {c: _cell(c, v) for c, v in zip(cols, r, strict=True)} for r in raw[: self.max_rows]
         ]
         log.info(
             "agent read result",

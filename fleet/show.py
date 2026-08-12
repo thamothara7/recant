@@ -31,7 +31,7 @@ def assemble_context(agent_name: str, query: str) -> dict:
         agent_id: UUID = row[0]
 
         docs = store_for(agent_id).similarity_search(query, k=CONTEXT_K)
-        statuses = {}
+        statuses: dict[UUID, str] = {}
         if docs:
             ids = [UUID(d.id) for d in docs]
             statuses = dict(

@@ -22,6 +22,7 @@ if TYPE_CHECKING:  # psycopg is annotation-only here: parse_event needs no DB,
     import psycopg  # so the receiver Lambda zip ships without the driver.
 
 AGENT_MEMORY_TABLE = "agent_memory"
+DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 class MalformedEvent(ValueError):
@@ -41,6 +42,7 @@ class RecantEvent:
     source_id: UUID
     actor: str
     evictions: tuple[Eviction, ...]
+    tenant_id: UUID = DEFAULT_TENANT_ID
 
     @property
     def all_belief_ids(self) -> list[UUID]:
@@ -69,6 +71,7 @@ def parse_event(
 
     try:
         source_id = UUID(payload["source_id"])
+        tenant_id = UUID(payload.get("tenant_id") or str(DEFAULT_TENANT_ID))
         actor = payload["actor"]
         raw = payload["evictions"]
     except (KeyError, TypeError, ValueError) as exc:
@@ -88,7 +91,9 @@ def parse_event(
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise MalformedEvent(f"recant event {event_id} evictions[{i}] malformed: {exc}") from exc
+            raise MalformedEvent(
+                f"recant event {event_id} evictions[{i}] malformed: {exc}"
+            ) from exc
 
     return RecantEvent(
         event_id=event_id,
@@ -96,6 +101,7 @@ def parse_event(
         source_id=source_id,
         actor=actor,
         evictions=tuple(evictions),
+        tenant_id=tenant_id,
     )
 
 
@@ -127,11 +133,27 @@ def apply_evictions(conn: psycopg.Connection, event: RecantEvent, *, consumer: s
     t0 = time.perf_counter()
     belief_ids = event.all_belief_ids
 
+    # EventBridge metadata is not authority. Require an exact match with the
+    # append-only tenant outbox row before applying any deletion or abort.
+    stored_row = conn.execute(
+        "SELECT kind, incident_id, payload FROM memory_events"
+        " WHERE tenant_id = %s AND event_id = %s",
+        (event.tenant_id, event.event_id),
+    ).fetchone()
+    if stored_row is None:
+        raise MalformedEvent(f"recant event {event.event_id} is not present in the tenant outbox")
+    stored_payload = json.loads(stored_row[2]) if isinstance(stored_row[2], str) else stored_row[2]
+    stored_event = parse_event(event.event_id, stored_row[0], stored_row[1], stored_payload)
+    if stored_event != event:
+        raise MalformedEvent(f"recant event {event.event_id} does not match the tenant outbox")
+
     deleted: list[tuple[UUID, str]] = []
     if belief_ids:
         deleted = conn.execute(
-            f"DELETE FROM {AGENT_MEMORY_TABLE} WHERE id = ANY(%s) RETURNING id, agent_id",
-            (belief_ids,),
+            f"DELETE FROM {AGENT_MEMORY_TABLE} AS memory WHERE id = ANY(%s)"
+            " AND EXISTS (SELECT 1 FROM beliefs b WHERE b.tenant_id = %s"
+            " AND b.belief_id = memory.id) RETURNING id, agent_id",
+            (belief_ids, event.tenant_id),
         ).fetchall()
     deleted_by_agent: dict[str, int] = {}
     for _, agent_ns in deleted:
@@ -142,9 +164,9 @@ def apply_evictions(conn: psycopg.Connection, event: RecantEvent, *, consumer: s
         aborted_rows = conn.execute(
             "UPDATE agent_actions SET status = 'aborted', status_reason = 'recant',"
             " incident_id = %s, resolved_at = now()"
-            " WHERE status = 'pending' AND derived_from && %s"
+            " WHERE tenant_id = %s AND status = 'pending' AND derived_from && %s"
             " RETURNING action_id, agent_id",
-            (event.incident_id, belief_ids),
+            (event.incident_id, event.tenant_id, belief_ids),
         ).fetchall()
 
     evictions = [
@@ -162,8 +184,10 @@ def apply_evictions(conn: psycopg.Connection, event: RecantEvent, *, consumer: s
     apply_ms = int((time.perf_counter() - t0) * 1000)
 
     conn.execute(
-        "INSERT INTO memory_events (kind, incident_id, payload) VALUES ('eviction', %s, %s)",
+        "INSERT INTO memory_events (tenant_id, kind, incident_id, payload)"
+        " VALUES (%s, 'eviction', %s, %s)",
         (
+            event.tenant_id,
             event.incident_id,
             json.dumps(
                 {
@@ -186,11 +210,18 @@ def apply_evictions(conn: psycopg.Connection, event: RecantEvent, *, consumer: s
     )
 
 
-def record_delivery(conn: psycopg.Connection, event_id: UUID, consumer: str, receipt: Receipt) -> None:
+def record_delivery(
+    conn: psycopg.Connection,
+    event_id: UUID,
+    consumer: str,
+    receipt: Receipt,
+    tenant_id: UUID = DEFAULT_TENANT_ID,
+) -> None:
     """The durable delivery row; PRIMARY KEY (event_id, consumer) makes a
     duplicate delivery a conflict instead of a silent double-apply."""
     conn.execute(
-        "INSERT INTO fanout_deliveries (event_id, consumer, evicted_rows, aborted_actions)"
-        " VALUES (%s, %s, %s, %s)",
-        (event_id, consumer, receipt.evicted_rows, receipt.aborted_actions),
+        "INSERT INTO fanout_deliveries"
+        " (tenant_id, event_id, consumer, evicted_rows, aborted_actions)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (tenant_id, event_id, consumer, receipt.evicted_rows, receipt.aborted_actions),
     )

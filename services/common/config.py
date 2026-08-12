@@ -13,4 +13,9 @@ def cors_origins() -> list[str]:
     'http://localhost:5173, https://demo.example.com' must not yield a leading
     space that never equals a browser Origin header (review 2026-07-03)."""
     raw = os.environ.get("RECANT_CORS_ORIGINS", DEFAULT_CORS_ORIGIN)
-    return [o.strip() for o in raw.split(",") if o.strip()]
+    origins = [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+    if os.environ.get("RECANT_ENV", "").strip().lower() == "production" and (
+        not origins or "*" in origins
+    ):
+        raise RuntimeError("production RECANT_CORS_ORIGINS must list exact browser origins")
+    return origins

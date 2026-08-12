@@ -44,6 +44,16 @@ def quarantine_client():
         yield c
 
 
+@pytest.fixture(scope="session")
+def guard_client():
+    from fastapi.testclient import TestClient
+
+    from services.guard.app import app
+
+    with TestClient(app) as c:
+        yield c
+
+
 @pytest.fixture(autouse=True)
 def clean_tables():
     if not os.environ.get("DATABASE_URL"):
@@ -64,12 +74,21 @@ def clean_tables():
         for table in (
             "fanout_deliveries",
             "agent_actions",
+            "action_permits",
+            "action_confirmations",
+            "action_decisions",
+            "semantic_relations",
+            "custody_checkpoints",
+            "idempotency_records",
+            "tool_policies",
             "derivations",
             "beliefs",
+            "context_receipts",
             "quarantine_actions",
             "incidents",
             "agents",
             "sources",
+            "api_principals",
             "memory_events",
         ):
             conn.execute(f"DELETE FROM {table}")

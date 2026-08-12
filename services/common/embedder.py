@@ -124,15 +124,20 @@ class TitanEmbedder:
             ),
         )
         payload = json.loads(resp["body"].read())
-        vector = payload["embedding"]
+        vector = [float(value) for value in payload["embedding"]]
         if len(vector) != DIMENSIONS:
             raise ValueError(
                 f"Titan returned {len(vector)} dims, expected {DIMENSIONS}"
             )
+        if any(not math.isfinite(value) for value in vector) or not any(vector):
+            raise ValueError("Titan returned a non-finite or zero embedding")
         return vector
 
 
-_EMBEDDERS: dict[str, type] = {"hash": HashEmbedder, "titan": TitanEmbedder}
+_EMBEDDERS: dict[str, type[HashEmbedder] | type[TitanEmbedder]] = {
+    "hash": HashEmbedder,
+    "titan": TitanEmbedder,
+}
 
 
 def select_embedder() -> Embedder:
@@ -157,10 +162,20 @@ def active_threshold() -> float:
     """
     env = os.environ.get("RECANT_TAINT_THRESHOLD")
     if env:
-        return float(env)
-    name = os.environ.get("RECANT_EMBEDDER", "hash")
-    cls = _EMBEDDERS.get(name, HashEmbedder)
-    return cls.default_threshold
+        try:
+            threshold = float(env)
+        except ValueError as exc:
+            raise ValueError("RECANT_TAINT_THRESHOLD must be between 0 and 1") from exc
+    else:
+        name = os.environ.get("RECANT_EMBEDDER", "hash")
+        try:
+            cls = _EMBEDDERS[name]
+        except KeyError:
+            raise ValueError(f"unknown RECANT_EMBEDDER: {name!r}") from None
+        threshold = cls.default_threshold
+    if not math.isfinite(threshold) or not 0 <= threshold <= 1:
+        raise ValueError("RECANT_TAINT_THRESHOLD must be between 0 and 1")
+    return threshold
 
 
 def cosine(a: list[float], b: list[float]) -> float:
