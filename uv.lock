@@ -439,7 +439,7 @@ wheels = [
 
 [[package]]
 name = "langchain-cockroachdb"
-version = "0.2.1"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "greenlet" },
@@ -451,9 +451,9 @@ dependencies = [
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "sqlalchemy-cockroachdb" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d4/90/dace8998416cb72cc33a540e5e25093fd5da5b68009fa9d3f712898317ee/langchain_cockroachdb-0.2.1.tar.gz", hash = "sha256:7663cad7acd389515f85fdcf1cdac01bd66e439c5b8487af99efe60ab1a1d844", size = 335014, upload-time = "2026-03-24T23:51:19.395Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/9e/3ccdd3224ed3580b9da18aee92e18cd997cf64768d53a558159e11668cc5/langchain_cockroachdb-0.3.0.tar.gz", hash = "sha256:e022c7678c48201f249cbd8c7f79c786be84c18ea763b8b8a536a74df21e401e", size = 340793, upload-time = "2026-07-15T15:36:40.256Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2b/b9/e31f9cd4c7445c66ba66b7011bd84fa981878243343aa3929230718648ba/langchain_cockroachdb-0.2.1-py3-none-any.whl", hash = "sha256:e40a02f83a549e04cf1915bd834f52c36229480c52875688b9a1d4e9cc3984e0", size = 39379, upload-time = "2026-03-24T23:51:18.224Z" },
+    { url = "https://files.pythonhosted.org/packages/30/da/d9a8e7adb7c769afb7314e104bd747acb4802cf79b11c61a7f94eea44b4a/langchain_cockroachdb-0.3.0-py3-none-any.whl", hash = "sha256:56486d7d06d952221d06f0fea6a7d2b88defe71d6ebce7a95e64aac8b2ff58fb", size = 41427, upload-time = "2026-07-15T15:36:38.949Z" },
 ]
 
 [[package]]
@@ -1032,7 +1032,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "langchain-cockroachdb", specifier = ">=0.2.1" },
+    { name = "langchain-cockroachdb", specifier = ">=0.3.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
