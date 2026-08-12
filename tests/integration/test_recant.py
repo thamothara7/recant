@@ -531,7 +531,7 @@ def test_knn_query_uses_vector_index(fx, qs):
             r[0]
             for r in conn.execute(
                 "EXPLAIN SELECT belief_id, status, created_at, embedding <=> %s::vector"
-                " FROM beliefs WHERE tenant_id = %s"
+                " FROM beliefs@beliefs_embedding_idx WHERE tenant_id = %s"
                 " ORDER BY embedding <=> %s::vector LIMIT 20",
                 (probe, DEFAULT_TENANT_ID, probe),
             ).fetchall()

@@ -97,7 +97,7 @@ def _knn_query(
         """
         SELECT belief_id, status, created_at, source_id, tenant_id, content,
                embedding <=> %s::vector AS dist
-        FROM beliefs
+        FROM beliefs@beliefs_embedding_idx
         WHERE tenant_id = %s
         ORDER BY embedding <=> %s::vector
         LIMIT %s
