@@ -26,8 +26,9 @@ and needs no backend.
 
 1. [What is in the repository](#what-is-in-the-repository)
 2. [Prerequisites](#prerequisites)
-3. [Option A: run only the console (no backend needed)](#option-a-run-only-the-console-no-backend-needed)
-4. [Option B: full local stack](#option-b-full-local-stack)
+3. [Quick start: full live demo](#quick-start-full-live-demo)
+4. [Option A: run only the console (no backend needed)](#option-a-run-only-the-console-no-backend-needed)
+5. [Option B: full local stack](#option-b-full-local-stack)
    - [Step 1: clone and configure](#step-1-clone-and-configure)
    - [Step 2: start the database](#step-2-start-the-database)
    - [Step 3: apply the schema](#step-3-apply-the-schema)
@@ -38,16 +39,16 @@ and needs no backend.
    - [Step 8: seed the demo scenario](#step-8-seed-the-demo-scenario)
    - [Step 9: preview and execute a recant](#step-9-preview-and-execute-a-recant)
    - [Step 10: connect the console to the local services](#step-10-connect-the-console-to-the-local-services)
-5. [Everyday commands](#everyday-commands)
-6. [Service and API reference](#service-and-api-reference)
-7. [Integrating an agent](#integrating-an-agent)
-8. [Recant Guard](#recant-guard)
-9. [Production security](#production-security)
-10. [Optional features](#optional-features)
-11. [Using Codex on this repository](#using-codex-on-this-repository)
-12. [Troubleshooting](#troubleshooting)
-13. [Safety notes](#safety-notes)
-14. [License](#license)
+6. [Everyday commands](#everyday-commands)
+7. [Service and API reference](#service-and-api-reference)
+8. [Integrating an agent](#integrating-an-agent)
+9. [Recant Guard](#recant-guard)
+10. [Production security](#production-security)
+11. [Optional features](#optional-features)
+12. [Using Codex on this repository](#using-codex-on-this-repository)
+13. [Troubleshooting](#troubleshooting)
+14. [Safety notes](#safety-notes)
+15. [License](#license)
 
 ---
 
@@ -71,7 +72,7 @@ and needs no backend.
 
 ### For the console only (Option A)
 
-- Node.js 20.19+ or 22.12+
+- Node.js 20.19+, or Node.js 22.12+ (Node.js 22 or 24 recommended)
 - npm (bundled with Node.js)
 - Git
 
@@ -81,7 +82,7 @@ and needs no backend.
   three-node local CockroachDB cluster.
 - **uv** (https://docs.astral.sh/uv/), which manages the Python version and all
   Python dependencies. You do not need a separate Python installation.
-- **Node.js 20.19+ or 22.12+** and npm, for the console only.
+- **Node.js 20.19+, or Node.js 22.12+**, and npm, for the console only.
 - Git.
 
 #### Install on macOS
@@ -106,6 +107,100 @@ docker info
 
 ---
 
+## Quick start: full live demo
+
+This is the shortest verified path from a fresh clone to the live console.
+Run each numbered block in the named terminal. The detailed explanation starts
+in [Option B](#option-b-full-local-stack).
+
+### 1. One-time setup
+
+```bash
+git clone https://github.com/thamothara7/recant.git
+cd recant
+test -f .env || cp .env.example .env
+uv sync
+bash ops/chaos/init.sh
+
+set -a
+. ./.env
+set +a
+uv run python -m db.migrate
+```
+
+Do not replace an existing `.env`; it may contain your local configuration.
+The database dashboard is available at http://localhost:8080.
+
+### 2. Terminal 1: start all four APIs
+
+```bash
+cd recant
+bash ops/run-services.sh
+```
+
+The launcher loads `.env` itself and keeps the gateway (`:8000`), quarantine
+service (`:8001`), forensics API (`:8002`), and Guard (`:8003`) running until
+you press Ctrl+C.
+
+### 3. Terminal 2: start durable eviction
+
+```bash
+cd recant
+set -a
+. ./.env
+set +a
+uv run python -m fanout.worker --consumer local-evictor
+```
+
+### 4. Terminal 3: seed once
+
+Wait until Terminal 1 says the services are running, then execute:
+
+```bash
+cd recant
+uv run python ops/seed/seed.py
+```
+
+The deterministic seed requires an empty custody database. If it reports
+`already seeded`, either use the existing data or follow the destructive reset
+instructions in [Step 8](#step-8-seed-the-demo-scenario).
+
+### 5. Terminal 4: start the live console
+
+```bash
+cd recant/console
+npm ci
+VITE_FORENSICS_URL=http://localhost:8002 \
+VITE_QUARANTINE_URL=http://localhost:8001 \
+VITE_GUARD_URL=http://localhost:8003 \
+  npm run dev
+```
+
+Open http://localhost:5173. Live mode opens in **Explore** automatically:
+
+1. Select the untrusted source in the left rail, or select its review prompt
+   above the board.
+2. Inspect the server-computed contamination preview.
+3. Select **Take back everything from this source**, then confirm the exact
+   number of memories that will be blocked.
+4. Watch the board refresh after the serializable recant transaction.
+5. Drag **Rewind time** to inspect the earlier state, then select **Back to
+   now**.
+6. Select a belief to inspect its provenance. Turn on **Advanced** to inspect
+   database primitives and Guard action decisions.
+
+The **Story** tab always uses built-in fixture data for a repeatable guided
+walkthrough. Switch back to **Explore** for the live database.
+
+To stop the stack, press Ctrl+C in the API, worker, and console terminals. Stop
+CockroachDB without deleting its data with:
+
+```bash
+docker compose -f ops/chaos/docker-compose.yml down
+```
+
+---
+
 ## Option A: run only the console (no backend needed)
 
 This is the fastest way to see Recant. It uses deterministic fixture data and
@@ -121,9 +216,10 @@ npm run dev
 Open http://localhost:5173 in your browser. Press Ctrl+C in the terminal to
 stop the server.
 
-The console opens in Story mode, which is a five-step guided walkthrough. Use
-the Story/Explore toggle in the top bar to switch to Explore mode, where you
-can click any belief card to trace its provenance.
+On a first visit the console opens in Story mode, which is a five-step guided
+walkthrough. After you complete it, later visits open in Explore. Use the
+Story/Explore toggle in the top bar to switch at any time, and click any belief
+card in Explore to trace its provenance.
 
 ---
 
@@ -201,9 +297,14 @@ docker compose -f ops/chaos/docker-compose.yml ps
 
 ### Step 3: apply the schema
 
-This command creates all the tables, indexes, and sequences that Recant needs:
+The migration runner reads `DATABASE_URL` from the current process, not from
+`.env` directly. Export the file in this terminal, then create all tables,
+indexes, policies, and sequences Recant needs:
 
 ```bash
+set -a
+. ./.env
+set +a
 uv run python -m db.migrate
 ```
 
@@ -333,9 +434,10 @@ seeded 3 agents, 4 sources, 9 beliefs
 ```
 
 The seeder creates a deterministic contamination scenario: a Research bot
-ingests a forum post claiming a 365-day refund window, a Support bot paraphrases
-that claim with no link back to the original, and an Ops bot queues a bad
-refund action based on the paraphrase.
+ingests a forum post claiming a 365-day refund window, and other bots copy or
+paraphrase that claim. Use the fleet demonstration under
+[Optional features](#fleet-eviction-demonstration) when you also want a real
+working-memory copy and a pending refund action to evict and abort.
 
 The seeder will fail with an error if data already exists. This is intentional
 so that running it twice does not produce a duplicate story. If you want to
@@ -343,9 +445,11 @@ start fresh, reset the local cluster first (this destroys all local data):
 
 ```bash
 bash ops/chaos/reset.sh
-bash ops/chaos/init.sh
-uv run python -m db.migrate
 ```
+
+`reset.sh` already recreates the three-node cluster and applies every migration.
+Stop the API launcher and eviction worker before running it, then restart the
+APIs before seeding.
 
 ### Step 9: preview and execute a recant
 
@@ -398,8 +502,12 @@ VITE_GUARD_URL=http://localhost:8003 \
   npm run dev
 ```
 
-Open http://localhost:5173. The console will now show your live local board
-instead of the built-in fixture data.
+Open http://localhost:5173. The console opens in Explore and shows your live
+local board instead of the built-in fixture data. Select the untrusted source
+to preview and execute a recant. Select any belief to inspect its provenance,
+and use Rewind time to compare the current board with an earlier database
+snapshot. Story mode remains a deterministic fixture walkthrough and does not
+mutate the live database.
 
 Important notes:
 
@@ -421,7 +529,7 @@ Important notes:
 | --- | --- | --- |
 | Start database | `bash ops/chaos/init.sh` | Idempotent. Requires Docker. |
 | Stop database | `docker compose -f ops/chaos/docker-compose.yml down` | Does not delete data. |
-| Reset database | `bash ops/chaos/reset.sh` | Destroys Docker volumes and all data. |
+| Reset database | `bash ops/chaos/reset.sh` | Destroys local data, recreates the cluster, and reapplies migrations. |
 | Apply schema | `uv run python -m db.migrate` | Requires an exported `DATABASE_URL`. Safe to repeat. |
 | Start services | `bash ops/run-services.sh` | Starts gateway `:8000`, quarantine `:8001`, forensics `:8002`, Guard `:8003`. |
 | Stop services | Ctrl+C in the services terminal | Stops all four services. |
@@ -431,6 +539,7 @@ Important notes:
 | Run unit tests only | `env -u DATABASE_URL uv run pytest tests/unit` | No database needed. |
 | Start console (fixtures) | `cd console && npm run dev` | No backend required. |
 | Start console (live) | `VITE_FORENSICS_URL=http://localhost:8002 VITE_QUARANTINE_URL=http://localhost:8001 VITE_GUARD_URL=http://localhost:8003 npm run dev` | Run from `console/`. Requires running services. |
+| Stop console or worker | Ctrl+C in its terminal | Each is a separate long-running process. |
 | Build console | `cd console && npm ci && npm run build` | Output goes to `console/dist/`. Not committed. |
 | Run fleet demo | `uv run python -m fleet.run --ticks 4` | Requires clean database, running gateway, and exported environment. |
 | Inspect fleet working memory | `uv run python -m fleet.show --agent ops` | Run after the fleet demo. |
@@ -737,8 +846,9 @@ set -a
 set +a
 ```
 
-Only `ops/run-services.sh` loads `.env` automatically. Every other command
-needs the variables exported manually.
+Only `ops/run-services.sh` loads `.env` automatically. Export it in each new
+terminal that runs database-backed Python commands such as migrations, tests,
+the worker, or the fleet.
 
 ### Migration fails
 
@@ -756,7 +866,7 @@ Migrations are tracked and safe to repeat.
 
 ### Service ports are already in use
 
-**Symptom:** `ports 8000/8001/8002 are already in use`.
+**Symptom:** `ports 8000/8001/8002/8003 are already in use`.
 
 **Resolution:** Identify the process:
 
@@ -764,9 +874,9 @@ Migrations are tracked and safe to repeat.
 lsof -nP -iTCP:8000 -sTCP:LISTEN
 ```
 
-Repeat for ports 8001 and 8002. Stop that specific process, then restart the
-launcher. If the process is a previous service launch, you can stop all three
-at once:
+Repeat for ports 8001, 8002, and 8003. Stop that specific process, then restart
+the launcher. If the process is a previous service launch, you can stop all
+four at once:
 
 ```bash
 pkill -f 'uvicorn services'
@@ -782,10 +892,11 @@ destroys all local data):
 
 ```bash
 bash ops/chaos/reset.sh
-bash ops/chaos/init.sh
-uv run python -m db.migrate
-uv run python ops/seed/seed.py
 ```
+
+The reset command recreates the cluster, applies all migrations, and stops any
+running API processes. Restart `bash ops/run-services.sh` in its terminal, then
+run `uv run python ops/seed/seed.py` from another terminal.
 
 ### Integration tests fail with concurrency errors
 
