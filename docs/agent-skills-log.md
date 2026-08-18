@@ -1,6 +1,13 @@
 # CockroachDB Agent Skills Log
 
-Log of invocations of the CockroachDB Agent Skills repo (https://github.com/cockroachlabs/cockroachdb-skills) against this project, per spec section 4 (doubles as the optional tool-feedback submission item). Install steps and the full skill-to-milestone map are in `skills-setup.md`.
+Evidence log for the CockroachDB Agent Skills repo
+(https://github.com/cockroachlabs/cockroachdb-skills). Install steps and the
+skill-to-milestone map are in `skills-setup.md`.
+
+**Submission status as of 2026-08-18:** installation is verified, but this file
+does not contain completed invocation findings. Recant therefore does not claim
+Agent Skills as one of its two submitted CockroachDB tools. Pending rows below
+are future work, not submission evidence.
 
 | Date | Skill invoked | Target | Finding | Change made |
 |------|----------------|--------|---------|-------------|

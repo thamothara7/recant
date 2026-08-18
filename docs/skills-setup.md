@@ -1,8 +1,8 @@
 # Skills setup
 
-Recant is built with two sets of Claude Code skills. This document records how they
-are installed so the setup is reproducible, and maps the CockroachDB Agent Skills to
-the milestones where Recant invokes them (spec sections 2 and 4).
+Recant has setup material for two sets of Claude Code skills. This document
+records how they are installed so the setup is reproducible and maps the
+CockroachDB Agent Skills to potential review points.
 
 ## 1. recant-frontend (project skill)
 
@@ -41,7 +41,12 @@ Claude Code is required before newly added skills are discovered.
 find -L ~/.claude/skills/cockroachdb-skills -name SKILL.md | wc -l   # expect 34
 ```
 
-### Skills Recant actually uses, by milestone
+### Skills mapped to project review points
+
+The table records intended review coverage. A skill is submission evidence only
+after `agent-skills-log.md` records a dated invocation, finding, and resulting
+change. No CockroachDB Agent Skill currently meets that evidence threshold, so
+the Devpost submission does not claim this tool.
 
 | Skill | Family | Recant use | Milestone |
 |---|---|---|---|

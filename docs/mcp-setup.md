@@ -1,14 +1,17 @@
 # CockroachDB Cloud Managed MCP Server Setup
 
-**Status: blocked on U1** (CockroachDB Cloud signup and cluster creation). These are the steps to run once U1 is complete; nothing here has been executed yet.
+**Status as of 2026-08-18:** the CockroachDB Cloud cluster exists and the MCP
+server was registered locally, but the interactive browser authorization was
+not completed. The Devpost submission therefore does not claim the Managed MCP
+Server as one of its two CockroachDB tools.
 
 Endpoint: `https://cockroachlabs.cloud/mcp` (HTTPS transport), per the Cockroach Labs quickstart:
 https://www.cockroachlabs.com/docs/cockroachcloud/connect-to-the-cockroachdb-cloud-mcp-server
 
-## Steps (after U1)
+## Setup steps
 
-1. Create (or reuse) a CockroachDB Cloud cluster and note its cluster ID.
-2. Add the server to this Claude Code session with the CLI:
+1. Create or reuse a CockroachDB Cloud cluster and note its cluster ID.
+2. Add the server to a supported agent session with the CLI:
 
    ```
    claude mcp add cockroachdb-cloud https://cockroachlabs.cloud/mcp --transport http --header "mcp-cluster-id: {your-cluster-id}"
@@ -26,7 +29,9 @@ https://www.cockroachlabs.com/docs/cockroachcloud/connect-to-the-cockroachdb-clo
    }
    ```
 
-3. Authorize the connection: run `claude /mcp`, select `cockroachdb-cloud`, complete the browser login/organization selection, and grant access via the "Authorize MCP Access" prompt.
+3. Authorize the connection: run `claude /mcp`, select `cockroachdb-cloud`,
+   complete the browser login and organization selection, and grant access via
+   the "Authorize MCP Access" prompt. This is the remaining step for Recant.
 
 ## Read-only policy
 
@@ -34,4 +39,7 @@ The Managed MCP Server itself exposes both read tools (queries, schema inspectio
 
 ## Audit log
 
-MCP tool calls against the cluster are audit-logged by CockroachDB Cloud. Retrieval of that audit log is done via the `ccloud` CLI (U2) from a script under `ops/`, planned for Week 3 alongside the fanout/eviction work, and is itself shown on camera in the demo video (section 11) as part of the custody story.
+MCP tool calls against the cluster are audit-logged by CockroachDB Cloud. Recant
+does not yet have a captured MCP audit record, so no such record appears in the
+submission video. The separate read-only `ccloud` preflight used by the
+submission lives at `ops/inspect_cloud_cluster.sh`.

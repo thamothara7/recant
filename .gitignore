@@ -18,6 +18,7 @@ recant-frontend.skill
 console/dist/
 console/.playwright-mcp/
 *.png
+!docs/architecture.png
 console/**/*.tsbuildinfo
 console/vite.config.js
 console/vite.config.d.ts

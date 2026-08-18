@@ -25,10 +25,11 @@ and needs no backend.
 ## Table of contents
 
 1. [What is in the repository](#what-is-in-the-repository)
-2. [Prerequisites](#prerequisites)
-3. [Quick start: full live demo](#quick-start-full-live-demo)
-4. [Option A: run only the console (no backend needed)](#option-a-run-only-the-console-no-backend-needed)
-5. [Option B: full local stack](#option-b-full-local-stack)
+2. [Hackathon integrations](#hackathon-integrations)
+3. [Prerequisites](#prerequisites)
+4. [Quick start: full live demo](#quick-start-full-live-demo)
+5. [Option A: run only the console (no backend needed)](#option-a-run-only-the-console-no-backend-needed)
+6. [Option B: full local stack](#option-b-full-local-stack)
    - [Step 1: clone and configure](#step-1-clone-and-configure)
    - [Step 2: start the database](#step-2-start-the-database)
    - [Step 3: apply the schema](#step-3-apply-the-schema)
@@ -39,16 +40,16 @@ and needs no backend.
    - [Step 8: seed the demo scenario](#step-8-seed-the-demo-scenario)
    - [Step 9: preview and execute a recant](#step-9-preview-and-execute-a-recant)
    - [Step 10: connect the console to the local services](#step-10-connect-the-console-to-the-local-services)
-6. [Everyday commands](#everyday-commands)
-7. [Service and API reference](#service-and-api-reference)
-8. [Integrating an agent](#integrating-an-agent)
-9. [Recant Guard](#recant-guard)
-10. [Production security](#production-security)
-11. [Optional features](#optional-features)
-12. [Using Codex on this repository](#using-codex-on-this-repository)
-13. [Troubleshooting](#troubleshooting)
-14. [Safety notes](#safety-notes)
-15. [License](#license)
+7. [Everyday commands](#everyday-commands)
+8. [Service and API reference](#service-and-api-reference)
+9. [Integrating an agent](#integrating-an-agent)
+10. [Recant Guard](#recant-guard)
+11. [Production security](#production-security)
+12. [Optional features](#optional-features)
+13. [Using Codex on this repository](#using-codex-on-this-repository)
+14. [Troubleshooting](#troubleshooting)
+15. [Safety notes](#safety-notes)
+16. [License](#license)
 
 ---
 
@@ -65,6 +66,42 @@ and needs no backend.
 | Demo fleet | `fleet/` | Three deterministic agents with CockroachDB-backed working memory. |
 | Web console | `console/` | Vite/React UI. Uses fixture data unless live API URLs are configured. |
 | Database | `db/migrations/` | Ordered CockroachDB schema migrations. |
+
+---
+
+## Hackathon integrations
+
+The submission uses these two CockroachDB tools:
+
+| Tool | What the agent does with it | Repository evidence |
+| --- | --- | --- |
+| Distributed Vector Indexing | Stores 1024-dimensional belief embeddings beside transactional custody records. The taint engine runs tenant-prefixed cosine kNN probes to find reworded copies that have no provenance edge, then verifies claim authority before expanding the closure. | `db/migrations/0009_tenant_vector_index.sql`, `services/taint_engine/engine.py`, and the vector-plan integration tests |
+| Agent-ready `ccloud` CLI | Gates release readiness with a read-only `cluster info` control-plane check. The agent parses JSON to require the named cluster to be ready on AWS in the expected region, then emits only a redacted summary. | `ops/inspect_cloud_cluster.sh` |
+
+Run the same secret-safe cluster preflight with:
+
+```bash
+bash ops/inspect_cloud_cluster.sh
+```
+
+The preflight requires an authenticated `ccloud` CLI and `jq`. It performs no
+cloud writes and exits nonzero if the cluster is missing, not ready, on the
+wrong provider, or outside the expected region.
+
+AWS provides the agent's model and event infrastructure:
+
+| AWS service | Use in Recant |
+| --- | --- |
+| Amazon Bedrock | Titan Text Embeddings V2 produces vectors for semantic taint discovery. Claude produces evidence-grounded incident affidavits through the Converse API. |
+| AWS Lambda and Amazon EventBridge | A webhook receiver validates CockroachDB changefeed events, publishes them to EventBridge, and a consumer atomically evicts contaminated working memory. |
+| Amazon S3 | Stores versioned evidence archives, signed custody checkpoints, and encrypted overflow manifests for large fanout events. |
+| AWS KMS | Supplies production signing keys for beliefs, quarantine actions, receipts, decisions, permits, and checkpoints. |
+
+![Recant architecture](docs/architecture.svg)
+
+The public console uses deterministic fixtures so judges can replay the full
+story without credentials or a warm backend. The same console switches to live
+Forensics and Quarantine APIs when their Vite URLs are configured.
 
 ---
 

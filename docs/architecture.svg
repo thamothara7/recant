@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Recant architecture</title>
+  <desc id="desc">Agent beliefs enter through the Attest Gateway, are stored with vectors and signed custody in CockroachDB Cloud, can be quarantined through a vector-assisted recant transaction, and are evicted through AWS Lambda and EventBridge. Forensics, Guard, Bedrock, S3, KMS, and ccloud provide investigation, action authorization, models, evidence storage, signing, and operations.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4B5563"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0B57D0"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#1F1F1F" flood-opacity="0.10"/>
+    </filter>
+    <style>
+      .title { font-family: Arial, sans-serif; font-size: 34px; font-weight: 700; fill: #1F1F1F; }
+      .subtitle { font-family: Arial, sans-serif; font-size: 17px; font-weight: 400; fill: #5F6368; }
+      .group-title { font-family: Arial, sans-serif; font-size: 20px; font-weight: 700; fill: #1F1F1F; }
+      .card-title { font-family: Arial, sans-serif; font-size: 17px; font-weight: 700; fill: #1F1F1F; }
+      .body { font-family: Arial, sans-serif; font-size: 14px; font-weight: 400; fill: #4B5563; }
+      .label { font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; fill: #4B5563; letter-spacing: 0.3px; }
+      .mono { font-family: Menlo, Consolas, monospace; font-size: 13px; font-weight: 400; fill: #30343B; }
+      .flow { fill: none; stroke: #4B5563; stroke-width: 2.5; marker-end: url(#arrow); }
+      .flow-blue { fill: none; stroke: #0B57D0; stroke-width: 3; marker-end: url(#arrow-blue); }
+      .flow-dashed { fill: none; stroke: #7A5AF8; stroke-width: 2.5; stroke-dasharray: 8 8; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#F8FAFD"/>
+
+  <text x="56" y="62" class="title">Recant: custody and incident response for shared agent memory</text>
+  <text x="56" y="92" class="subtitle">CockroachDB is the source of truth. Working memory is disposable. Consequential actions require a fresh permit.</text>
+
+  <!-- Agent fleet -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="150" width="285" height="500" rx="22" fill="#FFFFFF" stroke="#DADCE0"/>
+  </g>
+  <rect x="50" y="150" width="285" height="58" rx="22" fill="#E8F0FE"/>
+  <path d="M50 186 V208 H335 V186" fill="#E8F0FE"/>
+  <text x="74" y="185" class="group-title">Agent fleet</text>
+  <text x="74" y="230" class="label">SHARED WORKFLOW</text>
+
+  <g>
+    <rect x="74" y="252" width="237" height="72" rx="14" fill="#F8FAFD" stroke="#C7C7CC"/>
+    <circle cx="101" cy="288" r="13" fill="#0B57D0"/>
+    <text x="101" y="293" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">A</text>
+    <text x="127" y="281" class="card-title">Support agent</text>
+    <text x="127" y="302" class="body">learns policy facts</text>
+  </g>
+  <g>
+    <rect x="74" y="340" width="237" height="72" rx="14" fill="#F8FAFD" stroke="#C7C7CC"/>
+    <circle cx="101" cy="376" r="13" fill="#0B57D0"/>
+    <text x="101" y="381" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">B</text>
+    <text x="127" y="369" class="card-title">Research agent</text>
+    <text x="127" y="390" class="body">paraphrases shared memory</text>
+  </g>
+  <g>
+    <rect x="74" y="428" width="237" height="72" rx="14" fill="#F8FAFD" stroke="#C7C7CC"/>
+    <circle cx="101" cy="464" r="13" fill="#0B57D0"/>
+    <text x="101" y="469" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">C</text>
+    <text x="127" y="457" class="card-title">Operations agent</text>
+    <text x="127" y="478" class="body">plans a consequential action</text>
+  </g>
+  <g>
+    <rect x="74" y="526" width="237" height="88" rx="14" fill="#FCE8E6" stroke="#D93025"/>
+    <text x="94" y="557" class="card-title">Working memory</text>
+    <text x="94" y="580" class="body">Disposable vector copy</text>
+    <text x="94" y="600" class="body">Evicted after recant</text>
+  </g>
+
+  <!-- Recant services -->
+  <g filter="url(#shadow)">
+    <rect x="390" y="150" width="330" height="650" rx="22" fill="#FFFFFF" stroke="#DADCE0"/>
+  </g>
+  <rect x="390" y="150" width="330" height="58" rx="22" fill="#E8F0FE"/>
+  <path d="M390 186 V208 H720 V186" fill="#E8F0FE"/>
+  <text x="414" y="185" class="group-title">Recant control plane</text>
+
+  <g>
+    <rect x="414" y="238" width="282" height="92" rx="14" fill="#FFFFFF" stroke="#0B57D0" stroke-width="2"/>
+    <text x="435" y="269" class="card-title">Attest Gateway</text>
+    <text x="435" y="292" class="body">Only supported belief write path</text>
+    <text x="435" y="313" class="mono">source + rank + hash + signature</text>
+  </g>
+  <g>
+    <rect x="414" y="352" width="282" height="116" rx="14" fill="#FFF7E6" stroke="#E37400"/>
+    <text x="435" y="383" class="card-title">Quarantine and taint engine</text>
+    <text x="435" y="406" class="body">Explicit graph closure</text>
+    <text x="435" y="427" class="body">Vector kNN paraphrase discovery</text>
+    <text x="435" y="448" class="mono">recant(source_id)</text>
+  </g>
+  <g>
+    <rect x="414" y="490" width="282" height="108" rx="14" fill="#FCE8E6" stroke="#D93025"/>
+    <text x="435" y="521" class="card-title">Recant Guard</text>
+    <text x="435" y="544" class="body">Signed decision and policy check</text>
+    <text x="435" y="565" class="body">Exact-argument, one-use permit</text>
+    <text x="435" y="586" class="mono">consume immediately before effect</text>
+  </g>
+  <g>
+    <rect x="414" y="620" width="282" height="108" rx="14" fill="#E6F4EA" stroke="#188038"/>
+    <text x="435" y="651" class="card-title">Forensics</text>
+    <text x="435" y="674" class="body">Rebuild and verify signed payloads</text>
+    <text x="435" y="695" class="body">AOST replay and evidence export</text>
+    <text x="435" y="716" class="mono">read-only investigation</text>
+  </g>
+  <rect x="414" y="750" width="282" height="30" rx="15" fill="#F1F3F4"/>
+  <text x="555" y="770" text-anchor="middle" class="body">Tenant-scoped APIs and serializable retries</text>
+
+  <!-- CockroachDB -->
+  <g filter="url(#shadow)">
+    <rect x="780" y="150" width="420" height="650" rx="22" fill="#FFFFFF" stroke="#0B57D0" stroke-width="2"/>
+  </g>
+  <rect x="780" y="150" width="420" height="76" rx="22" fill="#0B57D0"/>
+  <path d="M780 193 V226 H1200 V193" fill="#0B57D0"/>
+  <text x="808" y="184" font-family="Arial" font-size="21" font-weight="700" fill="#FFFFFF">CockroachDB Cloud</text>
+  <text x="808" y="208" font-family="Arial" font-size="14" fill="#D7E3FF">System of record on AWS, us-east-1</text>
+
+  <g>
+    <rect x="808" y="254" width="364" height="118" rx="14" fill="#E8F0FE"/>
+    <text x="832" y="286" class="card-title">Beliefs and signed custody</text>
+    <text x="832" y="311" class="body">Tenant, source, authority, parents, status</text>
+    <text x="832" y="334" class="mono">VECTOR(1024) + cosine index</text>
+    <text x="832" y="356" class="body">Hash-chain signatures verified from stored fields</text>
+  </g>
+  <g>
+    <rect x="808" y="394" width="364" height="100" rx="14" fill="#FFF7E6"/>
+    <text x="832" y="426" class="card-title">Atomic recant transaction</text>
+    <text x="832" y="451" class="body">Quarantine, incident, permit revocation</text>
+    <text x="832" y="474" class="body">Signed action and outbox event commit together</text>
+  </g>
+  <g>
+    <rect x="808" y="516" width="174" height="108" rx="14" fill="#F8FAFD" stroke="#C7C7CC"/>
+    <text x="830" y="548" class="card-title">memory_events</text>
+    <text x="830" y="572" class="body">Append-only outbox</text>
+    <text x="830" y="594" class="body">Tenant event authority</text>
+  </g>
+  <g>
+    <rect x="998" y="516" width="174" height="108" rx="14" fill="#F8FAFD" stroke="#C7C7CC"/>
+    <text x="1020" y="548" class="card-title">fanout_deliveries</text>
+    <text x="1020" y="572" class="body">Exactly-once effect</text>
+    <text x="1020" y="594" class="body">Retry-safe ledger</text>
+  </g>
+  <g>
+    <rect x="808" y="646" width="364" height="108" rx="14" fill="#E6F4EA"/>
+    <text x="832" y="678" class="card-title">Forensic history</text>
+    <text x="832" y="703" class="mono">AS OF SYSTEM TIME</text>
+    <text x="832" y="726" class="body">RLS, database clock, signed checkpoints</text>
+  </g>
+
+  <!-- AWS -->
+  <g filter="url(#shadow)">
+    <rect x="1260" y="150" width="290" height="650" rx="22" fill="#FFFFFF" stroke="#DADCE0"/>
+  </g>
+  <rect x="1260" y="150" width="290" height="58" rx="22" fill="#FFF3E0"/>
+  <path d="M1260 186 V208 H1550 V186" fill="#FFF3E0"/>
+  <text x="1284" y="185" class="group-title">AWS services</text>
+  <g>
+    <rect x="1284" y="238" width="242" height="116" rx="14" fill="#FFF7E6" stroke="#E37400"/>
+    <text x="1305" y="269" class="card-title">Amazon Bedrock</text>
+    <text x="1305" y="294" class="body">Titan embeddings</text>
+    <text x="1305" y="316" class="body">Claude incident affidavits</text>
+    <text x="1305" y="338" class="body">Conservative fallback paths</text>
+  </g>
+  <g>
+    <rect x="1284" y="378" width="242" height="130" rx="14" fill="#FFF7E6" stroke="#E37400"/>
+    <text x="1305" y="409" class="card-title">Lambda and EventBridge</text>
+    <text x="1305" y="434" class="body">Authenticated webhook receiver</text>
+    <text x="1305" y="456" class="body">Retry, DLQ, and consumer</text>
+    <text x="1305" y="478" class="body">Transactional memory eviction</text>
+  </g>
+  <g>
+    <rect x="1284" y="532" width="242" height="106" rx="14" fill="#FFF7E6" stroke="#E37400"/>
+    <text x="1305" y="563" class="card-title">Amazon S3</text>
+    <text x="1305" y="588" class="body">Evidence and checkpoints</text>
+    <text x="1305" y="610" class="body">Encrypted overflow manifests</text>
+  </g>
+  <g>
+    <rect x="1284" y="662" width="242" height="92" rx="14" fill="#FFF7E6" stroke="#E37400"/>
+    <text x="1305" y="693" class="card-title">AWS KMS</text>
+    <text x="1305" y="718" class="body">Production signing keys</text>
+    <text x="1305" y="740" class="body">Fail closed outside development</text>
+  </g>
+
+  <!-- Flows -->
+  <path d="M335 284 H414" class="flow-blue"/>
+  <text x="374" y="272" text-anchor="middle" class="label">WRITE</text>
+  <path d="M696 284 H780" class="flow-blue"/>
+  <path d="M780 410 H696" class="flow-dashed"/>
+  <text x="738" y="396" text-anchor="middle" class="label">VECTOR kNN</text>
+  <path d="M780 675 H696" class="flow"/>
+  <text x="738" y="662" text-anchor="middle" class="label">AOST</text>
+  <path d="M1200 570 H1260 V443 H1284" class="flow"/>
+  <text x="1234" y="555" text-anchor="middle" class="label">CHANGEFEED</text>
+  <path d="M1284 478 H1232 V820 H198 V614" class="flow"/>
+  <text x="768" y="842" text-anchor="middle" class="label">VALIDATE, DELIVER, EVICT, ABORT DEPENDENT ACTION</text>
+  <path d="M1284 296 H1218 V284 H1200" class="flow"/>
+  <text x="1233" y="270" text-anchor="middle" class="label">EMBED</text>
+  <path d="M1284 585 H1218 V700 H1200" class="flow"/>
+  <text x="1230" y="688" text-anchor="middle" class="label">ARCHIVE</text>
+  <path d="M414 544 H335" class="flow"/>
+  <text x="374" y="532" text-anchor="middle" class="label">PERMIT</text>
+
+  <!-- Operations and console evidence -->
+  <g>
+    <rect x="798" y="112" width="244" height="38" rx="19" fill="#FFFFFF" stroke="#0B57D0"/>
+    <text x="920" y="136" text-anchor="middle" class="body">Ops agent: ccloud JSON preflight</text>
+    <path d="M1042 131 H1112 V150" class="flow-blue"/>
+  </g>
+  <g>
+    <rect x="50" y="688" width="285" height="112" rx="20" fill="#FFFFFF" stroke="#188038" stroke-width="2"/>
+    <text x="74" y="722" class="card-title">Judge and incident console</text>
+    <text x="74" y="748" class="body">Provenance thread, recant, AOST replay</text>
+    <text x="74" y="772" class="body">Deterministic Story or live API Explore</text>
+    <path d="M335 744 H414" class="flow"/>
+  </g>
+
+  <text x="56" y="875" class="subtitle">Trust boundary: writes enter through Attest Gateway, recant state changes belong to Quarantine, and tools execute only after Guard consumes a fresh permit.</text>
+</svg>
