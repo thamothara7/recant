@@ -5,7 +5,7 @@ description = "Chain of custody for machine memory: provenance and retraction su
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
+    "uvicorn[standard]>=0.52.1",
     "psycopg[binary,pool]>=3.2",
     "pydantic>=2.8",
     "cryptography>=50.0.0",
