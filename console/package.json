@@ -14,7 +14,7 @@
     "@fontsource/roboto": "^5.2.10",
     "@fontsource/roboto-mono": "^5.2.9",
     "@radix-ui/react-dialog": "^1.1.4",
-    "@xyflow/react": "^12.3.6",
+    "@xyflow/react": "^12.11.2",
     "framer-motion": "^11.15.0",
     "material-symbols": "^0.45.6",
     "react": "^18.3.1",
